@@ -1,0 +1,41 @@
+{
+  "tarih": "2026-08-21",
+  "macro": {
+    "tufe_yillik": 62.0,
+    "tcmb_politika_faizi": 46.0,
+    "beklenti_enflasyon": 58.0
+  },
+  "technical": {
+    "bist100": 11250.0,
+    "gram_altin": 4350.0,
+    "ons_altin": 2650.0,
+    "usdtry": 34.10,
+    "eurtry": 37.05,
+    "ma20": 11080.0,
+    "ma50": 10800.0,
+    "ma200": 10200.0,
+    "rsi": 58.0,
+    "macd": 45.0
+  },
+  "portfolio": {
+    "portfoy_degeri": 1000000.0,
+    "gunluk_getiri_yuzde": 0.6,
+    "yillik_getiri_yuzde": 55.0,
+    "borsa_yuzde": 25.0,
+    "altin_yuzde": 20.0,
+    "doviz_yuzde": 15.0,
+    "likit_repo_yuzde": 40.0,
+    "positions": [
+      {
+        "varlik_kodu": "BIST:THYAO",
+        "varlik_tipi": "BORSA",
+        "agirlik_yuzdesi": 10.0,
+        "ortalama_maliyet": 260.0
+      }
+    ]
+  },
+  "sentiment_notlari": [
+    "TCMB sıkı duruşunu koruyor",
+    "Küresel risk iştahı nötr"
+  ]
+}
