@@ -22,9 +22,10 @@ def signals_to_recommendations(
             stop_loss = round(row.kapanis * 0.97, 2)
             gerekce = (
                 f"Model {row.model_guveni * 100:.0f}% olasılıkla 10 işlem günü içinde "
-                f"yükseliş öngörüyor (backtest isabet oranı "
-                f"%{backtest_summary.isabet_orani * 100:.0f}, "
-                f"ortalama sinyal getirisi %{backtest_summary.ortalama_getiri * 100:.1f})."
+                f"yükseliş öngörüyor (backtest'te işlem maliyeti düşüldükten sonra "
+                f"isabet oranı %{backtest_summary.isabet_orani_net * 100:.0f}, "
+                f"ortalama net sinyal getirisi %{backtest_summary.ortalama_getiri_net * 100:.1f}, "
+                f"ort. round-trip maliyet %{backtest_summary.ortalama_islem_maliyeti * 100:.2f})."
             )
         else:
             hedef_fiyat = round(row.kapanis, 2)

@@ -50,10 +50,54 @@ sınıflandırıcı ile hisse/altın/döviz bazında "yükseliş bekleniyor" sin
    döneminde ürettiği geçmiş "AL" sinyallerini, o sinyalden sonraki 10
    günde gerçekleşen getiriyle birlikte raporlar (isabet oranı, ortalama
    getiri, kümülatif getiri) — yani önerilerden **önce** "bu model geçmişte
-   nasıl performans gösterdi" gösterimi.
+   nasıl performans gösterdi" gösterimi. Sonuçlar hem **brüt** hem
+   **işlem maliyeti düşülmüş (net)** olarak raporlanır (bkz. aşağıdaki
+   "İşlem maliyeti modeli").
 5. **Canlı sinyal → öneri** (`integration.py`): En güncel tarihteki model
-   çıktısını, backtest performansına atıfla gerekçelendirilmiş
-   `Recommendation` nesnelerine çevirir.
+   çıktısını, backtest'in **net** (maliyet sonrası) performansına atıfla
+   gerekçelendirilmiş `Recommendation` nesnelerine çevirir.
+
+### İşlem maliyeti modeli
+
+`run_backtest`, her sinyali brüt getirinin yanında round-trip (alış +
+satış) işlem maliyeti düşülmüş **net getiri** ile de raporlar. Varsayılan
+tek yön maliyet varsayımları (`DEFAULT_COST_BY_ASSET_TYPE`,
+`yatirim/ml/backtest.py`):
+
+| Varlık tipi | Tek yön maliyet | Round-trip |
+|---|---|---|
+| BORSA | %0.15 (komisyon + BSMV + borsa payı) | %0.30 |
+| ALTIN | %0.20 (alış-satış makası) | %0.40 |
+| DOVIZ | %0.08 (alış-satış makası) | %0.16 |
+
+Bunlar muhafazakar birer tahmindir; gerçek aracı kurumunuzun komisyon
+tarifesine göre `run_backtest(result, cost_by_asset_type={...})` ile
+ezilebilir. `BacktestSummary.to_dict()` hem `*_brut_*` hem `*_net_*`
+alanlarını döner — kararı **her zaman net rakamlara göre** verin, brüt
+rakamlar maliyetleri gizler ve yanıltıcı olabilir.
+
+### Canlı izleme — şu an NASIL çalışıyor, ne DEĞİL
+
+Bu pipeline **sürekli canlı bir servis değildir**; tek seferlik/batch bir
+akıştır: `--data` ile verilen CSV'nin **en son satırındaki** tarihe göre
+sinyal üretir (`latest_signals`). CSV ne zaman toplandıysa sinyal o ana
+aittir; kendi kendine güncellenmez.
+
+Bu depo, güvenlik amaçlı kısıtlı bir ağ ortamında geliştirildiği/çalıştığı
+için piyasa verisine gerçek zamanlı erişimi yoktur ve olamaz. Gerçek
+"canlı izleme" için elinizdeki tek yol, verinin toplandığı makinede
+(`scripts/collect_market_data.py`'yi çalıştırdığınız makine) periyodik bir
+görev kurmaktır — örn. Windows Görev Zamanlayıcı ile her gün piyasa
+kapanışından sonra:
+
+```bash
+python scripts/collect_market_data.py --years 3 --out gercek_fiyatlar.csv
+python -m yatirim.ml.run_pipeline --data gercek_fiyatlar.csv > guncel_rapor.txt
+```
+
+çalıştırılıp `guncel_rapor.txt` / `artifacts/guncel_sinyaller.csv`
+her gün üzerine yazılabilir. Bu depo şu an böyle bir zamanlayıcı
+içermiyor; istenirse eklenebilir.
 
 Çalıştırmak için:
 

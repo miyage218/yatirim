@@ -86,11 +86,14 @@ def main() -> int:
 
     print()
     print("=" * 72)
-    print("GÜNCEL MODEL SİNYALLERİ (canlı öneri girdisi)")
+    print("GÜNCEL MODEL SİNYALLERİ (son toplanan veriye göre, CANLI DEĞİL)")
     print("=" * 72)
     latest = latest_signals(result, feature_df)
+    n_al = (latest["sinyal"] == "AL").sum()
+    print(f"{n_al} AL sinyali / {len(latest)} enstrüman. En güvenli 20 sinyal:")
     with pd.option_context("display.max_columns", None, "display.width", 120):
-        print(latest.to_string(index=False))
+        print(latest.head(20).to_string(index=False))
+    latest.to_csv(ARTIFACTS_DIR / "guncel_sinyaller.csv", index=False)
 
     recommendations = signals_to_recommendations(latest, summary)
     print()

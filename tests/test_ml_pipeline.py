@@ -3,7 +3,7 @@ import pandas as pd
 
 from yatirim.ml.backtest import latest_signals, run_backtest
 from yatirim.ml.data_loader import load_price_csv
-from yatirim.ml.features import FEATURE_COLUMNS, build_feature_table
+from yatirim.ml.features import FEATURE_COLUMNS, FORWARD_HORIZON_DAYS, build_feature_table
 from yatirim.ml.integration import signals_to_recommendations
 from yatirim.ml.model import train_model
 from yatirim.ml.synthetic_data import generate_synthetic_market_data
@@ -44,7 +44,15 @@ def test_model_trains_and_backtest_reports_are_consistent():
     signal_table, summary = run_backtest(result, buy_threshold=0.5)
     assert summary.sinyal_sayisi == len(signal_table)
     if summary.sinyal_sayisi:
-        assert 0.0 <= summary.isabet_orani <= 1.0
+        assert 0.0 <= summary.isabet_orani_brut <= 1.0
+        assert 0.0 <= summary.isabet_orani_net <= 1.0
+        assert summary.ortalama_islem_maliyeti > 0.0
+        # net getiri her zaman brüt getiriden maliyet kadar düşük olmalı
+        assert (
+            signal_table["net_getiri"]
+            <= signal_table[f"brut_getiri_{FORWARD_HORIZON_DAYS}g"] + 1e-9
+        ).all()
+        assert summary.isabet_orani_net <= summary.isabet_orani_brut + 1e-9
 
     latest = latest_signals(result, features)
     assert set(latest["sinyal"]).issubset({"AL", "TUT"})
@@ -53,6 +61,20 @@ def test_model_trains_and_backtest_reports_are_consistent():
     recs = signals_to_recommendations(latest, summary)
     assert len(recs) == len(latest)
     assert all(r.islem_tipi in ("AL", "TUT") for r in recs)
+
+
+def test_higher_transaction_cost_lowers_net_return_and_hit_rate():
+    raw = _small_dataset()
+    features = build_feature_table(raw)
+    test_start = features["tarih"].max() - pd.Timedelta(days=180)
+    result = train_model(features, test_start=test_start)
+
+    _, cheap = run_backtest(result, buy_threshold=0.5, cost_by_asset_type={"BORSA": 0.0001, "ALTIN": 0.0001, "DOVIZ": 0.0001})
+    _, expensive = run_backtest(result, buy_threshold=0.5, cost_by_asset_type={"BORSA": 0.02, "ALTIN": 0.02, "DOVIZ": 0.02})
+
+    if cheap.sinyal_sayisi and expensive.sinyal_sayisi:
+        assert expensive.ortalama_getiri_net < cheap.ortalama_getiri_net
+        assert expensive.isabet_orani_net <= cheap.isabet_orani_net
 
 
 def test_load_price_csv_roundtrips_and_validates_schema(tmp_path):
