@@ -68,10 +68,25 @@ def _download_with_retry(ticker: str, period: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _normalized_naive_dates(index: pd.Index) -> pd.DatetimeIndex:
+    """Tz-aware/naive farkı olmadan takvim gününe indirger.
+
+    GC=F (ons altın, ABD borsası saati) ve TRY=X/EURTRY=X (FX, farklı
+    saat dilimi) farklı tz'lerle döner; ham tz-aware index'ler üzerinden
+    join yapılırsa 'aynı gün' aslında eşleşmez ve sonuç sessizce boş
+    kalır. Bu yüzden her iki taraf da join'den önce tz'siz takvim gününe
+    indirgenmelidir.
+    """
+    idx = pd.DatetimeIndex(index)
+    if idx.tz is not None:
+        idx = idx.tz_convert(None)
+    return idx.normalize()
+
+
 def _to_long_format(df: pd.DataFrame, sembol: str, varlik_tipi: str) -> pd.DataFrame:
     out = pd.DataFrame(
         {
-            "tarih": pd.to_datetime(df.index).tz_localize(None),
+            "tarih": _normalized_naive_dates(df.index),
             "sembol": sembol,
             "varlik_tipi": varlik_tipi,
             "acilis": df["Open"].to_numpy(),
@@ -101,9 +116,19 @@ def collect(years: int, symbols_file: Path) -> pd.DataFrame:
     if ons_altin.empty:
         raise RuntimeError("Ons altın verisi alınamadı, devam edilemiyor.")
 
-    gram_altin = ons_altin[["Open", "High", "Low", "Close", "Volume"]].join(
-        usdtry["Close"].rename("usdtry_close"), how="inner"
+    ons_altin_gunluk = ons_altin[["Open", "High", "Low", "Close", "Volume"]].copy()
+    ons_altin_gunluk.index = _normalized_naive_dates(ons_altin.index)
+    usdtry_gunluk_close = usdtry["Close"].copy()
+    usdtry_gunluk_close.index = _normalized_naive_dates(usdtry.index)
+
+    gram_altin = ons_altin_gunluk.join(
+        usdtry_gunluk_close.rename("usdtry_close"), how="inner"
     )
+    if gram_altin.empty:
+        raise RuntimeError(
+            "Ons altın ve USD/TRY serileri hiçbir takvim gününde örtüşmedi, "
+            "gram altın hesaplanamadı."
+        )
     for col in ("Open", "High", "Low", "Close"):
         gram_altin[col] = gram_altin[col] * gram_altin["usdtry_close"] / TROY_OUNCE_IN_GRAMS
     frames.append(_to_long_format(gram_altin, "GRAM_ALTIN", "ALTIN"))
