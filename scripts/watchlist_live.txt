@@ -1,0 +1,28 @@
+# Canlı izleme (live_monitor.py) için önerilen, daha küçük ve likit
+# sembol listesi. scripts/bist100_symbols.txt'nin tamamını her 15
+# dakikada iki kez (geçmiş + anlık) sorgulamak Yahoo Finance'i hız
+# sınırına takabilir; bu yüzden canlı izleme varsayılanı bu daha kısa
+# listedir. Genişletmek isterseniz bu dosyayı düzenleyin ya da
+# --symbols-file scripts/bist100_symbols.txt ile tam listeyi kullanın
+# (daha yavaş/riskli).
+AKBNK
+ARCLK
+ASELS
+BIMAS
+EREGL
+FROTO
+GARAN
+ISCTR
+KCHOL
+KOZAL
+PETKM
+PGSUS
+SAHOL
+SASA
+SISE
+TCELL
+THYAO
+TOASO
+TUPRS
+VAKBN
+YKBNK

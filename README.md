@@ -96,8 +96,11 @@ python -m yatirim.ml.run_pipeline --data gercek_fiyatlar.csv > guncel_rapor.txt
 ```
 
 çalıştırılıp `guncel_rapor.txt` / `artifacts/guncel_sinyaller.csv`
-her gün üzerine yazılabilir. Bu depo şu an böyle bir zamanlayıcı
-içermiyor; istenirse eklenebilir.
+her gün üzerine yazılabilir.
+
+Sürekli, Telegram bildirimli bir canlı izleme için `scripts/live_monitor.py`
++ `scripts/run_live_monitor.bat` kullanın — bkz. "Canlı izleme + Telegram
+bildirimi" bölümü aşağıda.
 
 Çalıştırmak için:
 
@@ -152,6 +155,53 @@ BIST 100 + gram altın + USD/EUR verisiyle çalıştırmak için:
 Kod tarafında başka hiçbir değişiklik gerekmez; `--data` verilmezse
 pipeline otomatik olarak sentetik veriye döner.
 
+### Canlı izleme + Telegram bildirimi
+
+`scripts/live_monitor.py`, hafta içi **10:00-18:10** arası **15 dakikada
+bir** izleme listesindeki sembollerin anlık fiyatını çekip eğitilmiş
+modelden geçirir; eşik üstü (**AL**) bir sinyal yakaladığında **Telegram**
+üzerinden bildirim gönderir. Aynı sembol için aynı gün ikinci bir bildirim
+atılmaz (`artifacts/live_state.json`).
+
+**Dürüst sınırlama**: Model **günlük** bar'lar üzerinde eğitildi (10 işlem
+günü ufuklu tahmin). Gün içinde 15 dakikada bir yeni bir günlük kapanış
+oluşmaz — script her turda "bugün şu ana kadar oluşan" bar'ı (açılıştan bu
+yana en yüksek/en düşük/son fiyat) yaklaşık bir günlük bar gibi kullanır.
+Bu, kapanış onaylı bir sinyal değil, **gün içi bir ön izlemedir**; kapanışta
+değişebilir. Ayrıca "İşlem maliyeti modeli" bölümündeki net rakamlar
+(isabet oranı ~%50, yani pratikte yazı-tura) burada da geçerli — bildirim
+almak, kârlı bir sinyal garantisi değildir.
+
+Kurulum:
+
+1. Önce gerçek veriyle modeli eğitin (yukarıdaki adımlar) — `artifacts/model.joblib`
+   oluşmuş olmalı.
+2. Telegram bot token'ınızı ve chat ID'nizi girin:
+   ```bash
+   copy scripts\.env.example scripts\.env
+   notepad scripts\.env
+   ```
+   (`scripts/.env` asla git'e commit edilmez — token'lar yalnızca kendi
+   makinenizde kalır.) Mevcut bir botunuzu kullanmak istiyorsanız o botu
+   yönettiğiniz Telegram sohbetinden `@BotFather` → `/mybots` → botu seçin
+   → **API Token** ile token'ı alabilirsiniz; chat ID'nizi öğrenmek için
+   `@userinfobot`'a mesaj atmanız yeterli.
+3. Bağımlılıkları kurun ve başlatın:
+   ```bash
+   pip install -r requirements-ml.txt
+   scripts\run_live_monitor.bat
+   ```
+   Pencereyi açık bırakın (veya arka planda çalışsın istiyorsanız Windows
+   Görev Zamanlayıcı'da "Oturum açılışında" tetikleyicisiyle bu `.bat`'ı
+   otomatik başlatın). Durdurmak için pencerede Ctrl+C.
+
+İzleme listesi varsayılan olarak `scripts/watchlist_live.txt`'teki ~20
+likit BIST hissesidir (tam BIST100 listesini her 15 dakikada iki kez
+sorgulamak Yahoo Finance'i hız sınırına takabilir); genişletmek için
+`python scripts\live_monitor.py --symbols-file scripts\bist100_symbols.txt`
+kullanabilir ya da `watchlist_live.txt`'i düzenleyebilirsiniz. Tek seferlik
+test için: `python scripts\live_monitor.py --once`.
+
 ## Proje yapısı
 
 - `yatirim/models.py` — girdi/çıktı veri modelleri (dataclass'lar)
@@ -169,6 +219,10 @@ pipeline otomatik olarak sentetik veriye döner.
 - `scripts/collect_market_data.py` — Yahoo Finance'ten gerçek veri toplama
   (internete açık makinede çalıştırılır, bu depodan değil)
 - `scripts/bist100_symbols.txt` — BIST 100 sembol listesi (yaklaşık)
+- `scripts/watchlist_live.txt` — canlı izleme için daha kısa/likit liste
+- `scripts/live_monitor.py` — 15 dk'da bir canlı kontrol + Telegram bildirimi
+- `scripts/run_live_monitor.bat` — canlı izleme için Windows başlatıcı
+- `scripts/.env.example` — Telegram kimlik bilgileri şablonu
 - `examples/sample_input.json` — örnek günlük girdi
 - `tests/` — strateji ve ML pipeline kurallarını doğrulayan birim testler
 
