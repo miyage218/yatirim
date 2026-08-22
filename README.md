@@ -67,10 +67,46 @@ konsola basar ve ardından güncel sinyalleri/önerileri gösterir. Ara
 çıktılar `artifacts/` klasörüne (fiyatlar, eğitilmiş model, backtest
 sinyal tablosu) kaydedilir.
 
-**Önemli sınırlama**: Sonuçlar sentetik veri üzerinde üretildiği için
-gerçek piyasa tahmini değildir; pipeline'ın amacı mimariyi (veri → özellik
-→ eğitim → backtest → canlı sinyal) uçtan uca çalışır ve test edilebilir
-halde göstermektir. Gerçek veri bağlandığında aynı kod tabanı kullanılır.
+**Önemli sınırlama**: Varsayılan çalıştırmada sonuçlar sentetik veri
+üzerinde üretildiği için gerçek piyasa tahmini değildir; amacı mimariyi
+(veri → özellik → eğitim → backtest → canlı sinyal) uçtan uca çalışır ve
+test edilebilir halde göstermektir.
+
+### Gerçek veriyle çalıştırma
+
+Bu depo, güvenlik amaçlı kısıtlı bir ağ ortamında geliştirildiği için
+buradan Yahoo Finance/TradingView gibi kaynaklara erişilemiyor. Gerçek
+BIST 100 + gram altın + USD/EUR verisiyle çalıştırmak için:
+
+1. **İnternete açık kendi makinenizde** veri toplama script'ini çalıştırın:
+
+   ```bash
+   pip install yfinance pandas
+   python scripts/collect_market_data.py --years 3 --out artifacts/gercek_fiyatlar.csv
+   ```
+
+   Bu script, `scripts/bist100_symbols.txt` içindeki sembol listesi için
+   Yahoo Finance'ten (`SEMBOL.IS`) 3 yıllık günlük OHLCV verisi, `TRY=X`
+   ile USD/TRY, `EURTRY=X` ile EUR/TRY ve `GC=F` (ons altın, USD) ×
+   USD/TRY'den türetilmiş gram altın (TRY) serisini indirir; hepsini
+   `yatirim/ml/synthetic_data.py`'nin ürettiğiyle **birebir aynı şemada**
+   tek bir CSV'ye yazar.
+
+   > `scripts/bist100_symbols.txt`'teki liste yaklaşıktır — BIST 100
+   > bileşimi üç ayda bir değişir, gerçek kararlar için Borsa
+   > İstanbul'un güncel endeks listesiyle karşılaştırıp dosyayı
+   > güncelleyin.
+
+2. Çıkan CSV'yi bu depoya (veya bu depoya erişimi olan bir ortama)
+   taşıyıp pipeline'ı gerçek veriyle çalıştırın:
+
+   ```bash
+   pip install -r requirements-ml.txt
+   python -m yatirim.ml.run_pipeline --data artifacts/gercek_fiyatlar.csv
+   ```
+
+Kod tarafında başka hiçbir değişiklik gerekmez; `--data` verilmezse
+pipeline otomatik olarak sentetik veriye döner.
 
 ## Proje yapısı
 
@@ -84,7 +120,11 @@ halde göstermektir. Gerçek veri bağlandığında aynı kod tabanı kullanıl�
 - `yatirim/ml/model.py` — walk-forward model eğitimi
 - `yatirim/ml/backtest.py` — geçmiş dönem durum analizi (backtest) demosu
 - `yatirim/ml/integration.py` — model sinyallerini `Recommendation`'a çevirir
-- `yatirim/ml/run_pipeline.py` — uçtan uca demo CLI
+- `yatirim/ml/data_loader.py` — gerçek fiyat CSV'sini yükler/doğrular
+- `yatirim/ml/run_pipeline.py` — uçtan uca demo CLI (`--data` ile gerçek veri)
+- `scripts/collect_market_data.py` — Yahoo Finance'ten gerçek veri toplama
+  (internete açık makinede çalıştırılır, bu depodan değil)
+- `scripts/bist100_symbols.txt` — BIST 100 sembol listesi (yaklaşık)
 - `examples/sample_input.json` — örnek günlük girdi
 - `tests/` — strateji ve ML pipeline kurallarını doğrulayan birim testler
 

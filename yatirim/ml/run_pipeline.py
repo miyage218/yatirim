@@ -1,13 +1,20 @@
-"""Uçtan uca demo: sentetik veri üret -> özellik çıkar -> model eğit
+"""Uçtan uca demo: veri hazırla -> özellik çıkar -> model eğit
 -> geçmiş dönem üzerinde durum analizi (backtest) göster -> canlı sinyalleri
 öneri formatında bas.
 
+Varsayılan olarak sentetik veri üretir (bu ortamdan gerçek piyasa
+verisine ağ erişimi yok). Gerçek veriyle çalıştırmak için önce
+`scripts/collect_market_data.py`'yi internete açık bir makinede
+çalıştırıp çıkan CSV'yi `--data` ile verin:
+
 Kullanım:
     python -m yatirim.ml.run_pipeline
+    python -m yatirim.ml.run_pipeline --data artifacts/gercek_fiyatlar.csv
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -15,6 +22,7 @@ import joblib
 import pandas as pd
 
 from .backtest import latest_signals, run_backtest
+from .data_loader import load_price_csv
 from .features import build_feature_table
 from .integration import signals_to_recommendations
 from .model import train_model
@@ -25,11 +33,25 @@ TEST_WINDOW_DAYS = 252  # backtest/demo dönemi: son ~1 yıl
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="scripts/collect_market_data.py çıktısı gerçek fiyat CSV'si. "
+        "Verilmezse sentetik veri üretilir.",
+    )
+    args = parser.parse_args()
+
     ARTIFACTS_DIR.mkdir(exist_ok=True)
 
-    print("[1/4] 3 yıllık sentetik BIST/altın/döviz verisi üretiliyor...")
-    raw_prices = generate_synthetic_market_data(years=3, seed=42)
-    raw_prices.to_csv(ARTIFACTS_DIR / "sentetik_fiyatlar.csv", index=False)
+    if args.data is not None:
+        print(f"[1/4] Gerçek fiyat verisi yükleniyor: {args.data}")
+        raw_prices = load_price_csv(args.data)
+    else:
+        print("[1/4] 3 yıllık sentetik BIST/altın/döviz verisi üretiliyor...")
+        raw_prices = generate_synthetic_market_data(years=3, seed=42)
+        raw_prices.to_csv(ARTIFACTS_DIR / "sentetik_fiyatlar.csv", index=False)
 
     print("[2/4] Teknik göstergeler ve etiketler hesaplanıyor...")
     feature_df = build_feature_table(raw_prices)

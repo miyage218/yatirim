@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from yatirim.ml.backtest import latest_signals, run_backtest
+from yatirim.ml.data_loader import load_price_csv
 from yatirim.ml.features import FEATURE_COLUMNS, build_feature_table
 from yatirim.ml.integration import signals_to_recommendations
 from yatirim.ml.model import train_model
@@ -52,6 +53,24 @@ def test_model_trains_and_backtest_reports_are_consistent():
     recs = signals_to_recommendations(latest, summary)
     assert len(recs) == len(latest)
     assert all(r.islem_tipi in ("AL", "TUT") for r in recs)
+
+
+def test_load_price_csv_roundtrips_and_validates_schema(tmp_path):
+    raw = _small_dataset()
+    csv_path = tmp_path / "prices.csv"
+    raw.drop(columns=["rejim"]).to_csv(csv_path, index=False)
+
+    loaded = load_price_csv(csv_path)
+    assert set(loaded["sembol"]) == set(raw["sembol"])
+    assert len(loaded) == len(raw)
+
+    bad_csv = tmp_path / "bad.csv"
+    raw[["tarih", "sembol"]].to_csv(bad_csv, index=False)
+    try:
+        load_price_csv(bad_csv)
+        assert False, "eksik sütunlarda ValueError beklenirdi"
+    except ValueError:
+        pass
 
 
 def test_train_raises_on_empty_split():
