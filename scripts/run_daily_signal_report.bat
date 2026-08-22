@@ -19,8 +19,9 @@ if not exist "artifacts\model.joblib" (
     exit /b 1
 )
 
-echo Canli izleme baslatiliyor - hafta ici 10:00-18:10 arasi 15 dakikada bir kontrol edecek.
+echo Gunluk sinyal raporu baslatiliyor - hafta ici her gun saat 18:15'te
+echo (BIST kapanisindan sonra) AL/SAT/TUT raporu Telegram'a gonderilecek.
 echo Durdurmak icin bu pencerede Ctrl+C'ye basin.
-python scripts\live_monitor.py
+python scripts\daily_signal_report.py
 
 pause
