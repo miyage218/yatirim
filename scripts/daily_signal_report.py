@@ -52,6 +52,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -90,6 +91,7 @@ TELEGRAM_MESSAGE_LIMIT = 3500  # Telegram'ın 4096 sınırının altında güven
 
 REPORT_COMMAND = "son_rapor"
 COMMAND_POLL_TIMEOUT_SECONDS = 25  # getUpdates long-poll süresi
+GETUPDATES_ERROR_BACKOFF_SECONDS = 10  # hata durumunda sıkı döngüye girmemek için bekleme
 
 
 def _load_env_file(path: Path) -> None:
@@ -189,9 +191,19 @@ def _get_updates(token: str, offset: int | None, timeout: int) -> list[dict]:
         resp = requests.get(url, params=params, timeout=timeout + 10)
     except requests.RequestException as exc:
         print(f"  [UYARI] getUpdates başarısız: {exc}", file=sys.stderr)
+        time.sleep(GETUPDATES_ERROR_BACKOFF_SECONDS)
         return []
     if resp.status_code != 200:
         print(f"  [UYARI] getUpdates başarısız: {resp.status_code} {resp.text}", file=sys.stderr)
+        if resp.status_code == 409:
+            print(
+                "  [UYARI] Bu genelde AYNI bot token'ıyla başka bir process de "
+                "getUpdates çağırıyor demektir (Telegram tek seferde tek dinleyiciye "
+                "izin verir). Bu proje için @BotFather'dan ayrı bir bot oluşturmanız "
+                "önerilir.",
+                file=sys.stderr,
+            )
+        time.sleep(GETUPDATES_ERROR_BACKOFF_SECONDS)
         return []
     return resp.json().get("result", [])
 

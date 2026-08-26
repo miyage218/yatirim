@@ -184,10 +184,20 @@ Kurulum:
    notepad scripts\.env
    ```
    (`scripts/.env` asla git'e commit edilmez — token'lar yalnızca kendi
-   makinenizde kalır.) Mevcut bir botunuzu kullanmak istiyorsanız o botu
-   yönettiğiniz Telegram sohbetinden `@BotFather` → `/mybots` → botu seçin
-   → **API Token** ile token'ı alabilirsiniz; chat ID'nizi öğrenmek için
-   `@userinfobot`'a mesaj atmanız yeterli.
+   makinenizde kalır.)
+
+   **Önemli — mutlaka bu proje için AYRI bir bot oluşturun.** Telegram,
+   aynı bot token'ı için aynı anda yalnızca **tek bir** `getUpdates`
+   (komut dinleme) bağlantısına izin verir. Bu script `/son_rapor`
+   komutunu dinlemek için sürekli `getUpdates` çağırır; token başka bir
+   projede (ör. başka bir botta) da polling için kullanılıyorsa
+   `telegram.error.Conflict` / `409 Conflict` hatasıyla iki taraf da
+   birbirini kilitler. Yeni bot oluşturmak 30 saniye sürer ve ücretsizdir:
+   Telegram'da `@BotFather` → `/newbot` → istenen adı/kullanıcı adını
+   girin → verilen **API Token**'ı `scripts\.env`'e yazın. Mesajlar yine
+   aynı Telegram hesabınıza gelir, sadece farklı bir bot kullanıcı
+   adından. Chat ID'nizi öğrenmek için `@userinfobot`'a mesaj atmanız
+   yeterli (chat ID hesabınıza ait olduğu için botlar arasında değişmez).
 3. Bağımlılıkları kurun ve başlatın:
    ```bash
    pip install -r requirements-ml.txt
