@@ -95,6 +95,14 @@ GETUPDATES_ERROR_BACKOFF_SECONDS = 10  # hata durumunda sıkı döngüye girmeme
 
 
 def _load_env_file(path: Path) -> None:
+    """`scripts/.env`'i ortam değişkenlerine yükler.
+
+    Kasıtlı olarak MEVCUT ortam değişkenlerinin üzerine yazar (setdefault
+    DEĞİL): sistemde/kullanıcıda daha önceden (başka bir uygulama için)
+    ayarlanmış aynı isimli bir TELEGRAM_BOT_TOKEN varsa, `.env` dosyası
+    hâlâ öncelikli olmalı — aksi halde script sessizce yanlış bot'u
+    kullanır ve bunu fark etmek zordur. Bir çakışma varsa uyarı basılır.
+    """
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -102,7 +110,37 @@ def _load_env_file(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+        key, value = key.strip(), value.strip()
+        existing = os.environ.get(key)
+        if existing is not None and existing != value:
+            print(
+                f"  [UYARI] Ortam değişkeni {key} zaten sistemde tanımlıydı, "
+                f"scripts/.env'deki değerle değiştiriliyor (sistemdeki eski "
+                f"değer kullanılmayacak).",
+                file=sys.stderr,
+            )
+        os.environ[key] = value
+
+
+def print_bot_identity(token: str, chat_id: str) -> None:
+    """Hangi Telegram bot'una ve chat ID'ye bağlanıldığını ekrana basar.
+
+    Aynı bilgisayarda birden fazla proje/bot varsa, `.env`'deki token'ın
+    gerçekten beklenen bot'a ait olup olmadığını göz kararı doğrulamak
+    için kullanılır (bkz. README "getUpdates Conflict" notu).
+    """
+    url = f"https://api.telegram.org/bot{token}/getMe"
+    try:
+        resp = requests.get(url, timeout=15)
+        data = resp.json()
+    except requests.RequestException as exc:
+        print(f"  [UYARI] Bot kimliği doğrulanamadı (ağ hatası): {exc}", file=sys.stderr)
+        return
+    if not data.get("ok"):
+        print(f"  [UYARI] Bot kimliği doğrulanamadı: {data}", file=sys.stderr)
+        return
+    bot = data["result"]
+    print(f"Kullanılan bot: @{bot.get('username')} ({bot.get('first_name')}) -> chat_id={chat_id}")
 
 
 def _telegram_credentials() -> tuple[str, str]:
@@ -428,6 +466,7 @@ def main() -> int:
 
     _load_env_file(Path(__file__).parent / ".env")
     token, chat_id = _telegram_credentials()  # erken doğrulama: eksikse hemen hata ver
+    print_bot_identity(token, chat_id)
 
     hour, minute = (int(x) for x in args.run_time.split(":"))
     run_time = dtime(hour, minute)
