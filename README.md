@@ -200,6 +200,16 @@ Kurulum:
    "Oturum açılışında" tetikleyicisiyle başlatın. Durdurmak için pencerede
    Ctrl+C.
 
+**"Son raporu tekrar gönder" komutu**: Script çalışırken (bekleme
+sırasında) Telegram bot menüsüne (sohbette `/` tuşuna basınca çıkan liste)
+otomatik olarak **`/son_rapor`** komutu eklenir. Bir mesajı kaçırdıysan bu
+komuta bastığında, model tekrar çalıştırılmadan, **en son gönderilen
+raporun tam içeriği** ve **ne zaman üretildiği** (`🕐 En son rapor tarihi:
+...`) bilgisiyle birlikte tekrar gönderilir. Bu bilgi `artifacts/last_report.json`
+içinde saklanır. Script kapalıyken gönderilen `/son_rapor` komutları,
+script tekrar başlatıldığında eskimiş sayılıp yanıtlanmaz (yalnızca
+başlangıçtan sonra gelen komutlar işlenir).
+
 İzleme listesi varsayılan olarak `scripts/watchlist_live.txt`'teki ~20
 likit BIST hissesidir; genişletmek için
 `python scripts\daily_signal_report.py --symbols-file scripts\bist100_symbols.txt`

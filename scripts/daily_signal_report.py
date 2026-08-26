@@ -34,9 +34,14 @@ sadece ortam değişkeninden veya yanındaki .env dosyasından okur):
     TELEGRAM_BOT_TOKEN=123456:ABC-...
     TELEGRAM_CHAT_ID=123456789
 
+Ayrıca Telegram bot menüsüne bir "/son_rapor" komutu eklenir: bu komuta
+her basıldığında, yeniden hesaplama yapılmadan, en son gönderilen rapor
+ne zaman üretildiği bilgisiyle birlikte tekrar gönderilir (bekleme
+döngüsü sırasında Telegram'dan gelen komutlar long-polling ile dinlenir).
+
 Kullanım:
-    python scripts/daily_signal_report.py            # her gün 18:15'i bekleyip çalışır (döngü)
-    python scripts/daily_signal_report.py --once      # hemen tek sefer çalışıp çık (test için)
+    python scripts/daily_signal_report.py            # her gün 18:15'i bekler, arada /son_rapor komutunu dinler
+    python scripts/daily_signal_report.py --once      # hemen tek sefer rapor üretip çık (test için, komut dinlemez)
     python scripts/daily_signal_report.py --run-time 18:30
     python scripts/daily_signal_report.py --symbols-file scripts/bist100_symbols.txt
 """
@@ -44,9 +49,9 @@ Kullanım:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
-import time
 from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -74,6 +79,7 @@ from yatirim.ml.features import FEATURE_COLUMNS, build_feature_table  # noqa: E4
 ARTIFACTS_DIR = REPO_ROOT / "artifacts"
 MODEL_PATH = ARTIFACTS_DIR / "model.joblib"
 DEFAULT_SYMBOLS_FILE = REPO_ROOT / "scripts" / "watchlist_live.txt"
+LAST_REPORT_PATH = ARTIFACTS_DIR / "last_report.json"
 
 ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
 DEFAULT_RUN_TIME = dtime(18, 15)
@@ -81,6 +87,9 @@ HISTORY_PERIOD = "1y"  # MA200 ısınması + son kapanış için yeterli geçmi�
 BUY_THRESHOLD = 0.55
 SELL_THRESHOLD = 0.45
 TELEGRAM_MESSAGE_LIMIT = 3500  # Telegram'ın 4096 sınırının altında güvenli pay
+
+REPORT_COMMAND = "son_rapor"
+COMMAND_POLL_TIMEOUT_SECONDS = 25  # getUpdates long-poll süresi
 
 
 def _load_env_file(path: Path) -> None:
@@ -114,6 +123,125 @@ def send_telegram_message(text: str) -> None:
     )
     if resp.status_code != 200:
         print(f"  [UYARI] Telegram bildirimi gönderilemedi: {resp.status_code} {resp.text}", file=sys.stderr)
+
+
+def register_bot_commands() -> None:
+    """Bot menüsüne (sohbette '/' tuşuna basınca çıkan liste) /son_rapor
+    komutunu ekler. Bu bir kereye mahsus değildir, script her
+    başladığında tekrar çağrılır (Telegram API'de idempotent).
+    """
+    token, _ = _telegram_credentials()
+    url = f"https://api.telegram.org/bot{token}/setMyCommands"
+    commands = [{"command": REPORT_COMMAND, "description": "En son sinyal raporunu tekrar gönder"}]
+    try:
+        resp = requests.post(url, json={"commands": commands}, timeout=15)
+        if resp.status_code != 200:
+            print(f"  [UYARI] Bot komut menüsü kaydedilemedi: {resp.status_code} {resp.text}", file=sys.stderr)
+    except requests.RequestException as exc:
+        print(f"  [UYARI] Bot komut menüsü kaydedilemedi: {exc}", file=sys.stderr)
+
+
+def _save_last_report(messages: list[str], generated_at: datetime) -> None:
+    ARTIFACTS_DIR.mkdir(exist_ok=True)
+    LAST_REPORT_PATH.write_text(
+        json.dumps(
+            {"olusturulma_zamani": generated_at.isoformat(), "mesajlar": messages},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _load_last_report() -> dict | None:
+    if not LAST_REPORT_PATH.exists():
+        return None
+    return json.loads(LAST_REPORT_PATH.read_text(encoding="utf-8"))
+
+
+def reply_with_last_report() -> None:
+    """/son_rapor komutuna cevap: en son ÜRETİLMİŞ raporu, ne zaman
+    üretildiği bilgisiyle birlikte AYNEN tekrar gönderir. Modeli tekrar
+    çalıştırmaz/yeniden hesaplamaz — sadece son sonucu tekrarlar.
+    """
+    last = _load_last_report()
+    if last is None:
+        send_telegram_message("Henüz gönderilmiş bir rapor yok. İlk günlük rapor 18:15'te gönderilecek.")
+        return
+
+    generated_at = datetime.fromisoformat(last["olusturulma_zamani"])
+    header = f"🕐 <b>En son rapor tarihi: {generated_at.strftime('%Y-%m-%d %H:%M')}</b>\n(yeniden hesaplanmadı, son çalıştırmadan tekrar gönderildi)\n\n"
+    messages = last.get("mesajlar") or []
+    if not messages:
+        send_telegram_message(header + "(mesaj içeriği bulunamadı)")
+        return
+    send_telegram_message(header + messages[0])
+    for message in messages[1:]:
+        send_telegram_message(message)
+
+
+def _get_updates(token: str, offset: int | None, timeout: int) -> list[dict]:
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    params: dict = {"timeout": timeout}
+    if offset is not None:
+        params["offset"] = offset
+    try:
+        resp = requests.get(url, params=params, timeout=timeout + 10)
+    except requests.RequestException as exc:
+        print(f"  [UYARI] getUpdates başarısız: {exc}", file=sys.stderr)
+        return []
+    if resp.status_code != 200:
+        print(f"  [UYARI] getUpdates başarısız: {resp.status_code} {resp.text}", file=sys.stderr)
+        return []
+    return resp.json().get("result", [])
+
+
+def _handle_updates(updates: list[dict], chat_id: str) -> int | None:
+    """Gelen komutları işler, işlenen son update_id'yi döner (offset'i
+    ilerletmek için)."""
+    last_update_id = None
+    for update in updates:
+        last_update_id = update["update_id"]
+        message = update.get("message") or update.get("channel_post")
+        if not message:
+            continue
+        text = (message.get("text") or "").strip()
+        incoming_chat_id = str(message.get("chat", {}).get("id", ""))
+        if incoming_chat_id != str(chat_id):
+            continue  # yalnızca .env'deki yetkili chat_id'den gelen komutlar işlenir
+        if text.startswith(f"/{REPORT_COMMAND}"):
+            print(f"  Komut alındı: {text} -> son rapor gönderiliyor")
+            reply_with_last_report()
+        elif text == "/start":
+            send_telegram_message(
+                f"Merhaba! Her gün 18:15'te otomatik AL/SAT/TUT raporu gönderilir. "
+                f"İstediğin an en son raporu tekrar görmek için menüden /{REPORT_COMMAND} komutunu kullanabilirsin."
+            )
+    return last_update_id
+
+
+def wait_until_with_command_listening(next_run: datetime, token: str, chat_id: str, offset_state: dict) -> None:
+    """`next_run`'a kadar bekler; beklerken Telegram'dan gelen komutları
+    (özellikle /son_rapor) long-polling ile dinleyip anında cevaplar.
+    """
+    while True:
+        now = datetime.now(ISTANBUL_TZ)
+        remaining = (next_run - now).total_seconds()
+        if remaining <= 0:
+            return
+        poll_timeout = int(min(COMMAND_POLL_TIMEOUT_SECONDS, max(1, remaining)))
+        updates = _get_updates(token, offset_state.get("offset"), poll_timeout)
+        last_id = _handle_updates(updates, chat_id)
+        if last_id is not None:
+            offset_state["offset"] = last_id + 1
+
+
+def _discard_pending_updates(token: str, offset_state: dict) -> None:
+    """Script kapalıyken birikmiş eski komutları (varsa) yeniden işlemeden
+    atlamak için başlangıçta bir kere çağrılır."""
+    updates = _get_updates(token, offset_state.get("offset"), timeout=0)
+    if updates:
+        offset_state["offset"] = updates[-1]["update_id"] + 1
 
 
 def _read_symbols(symbols_file: Path) -> list[str]:
@@ -238,8 +366,10 @@ def run_daily_report(model, symbols_file: Path, buy_threshold: float, sell_thres
         send_telegram_message("⚠️ Günlük sinyal raporu: hiçbir sembol için veri alınamadı.")
         return signals
 
-    for message in _format_report_message(signals, now):
+    messages = _format_report_message(signals, now)
+    for message in messages:
         send_telegram_message(message)
+    _save_last_report(messages, now)
 
     ARTIFACTS_DIR.mkdir(exist_ok=True)
     signals.to_csv(ARTIFACTS_DIR / "gunluk_sinyal_raporu.csv", index=False)
@@ -267,7 +397,7 @@ def main() -> int:
     args = parser.parse_args()
 
     _load_env_file(Path(__file__).parent / ".env")
-    _telegram_credentials()  # erken doğrulama: eksikse hemen hata ver
+    token, chat_id = _telegram_credentials()  # erken doğrulama: eksikse hemen hata ver
 
     hour, minute = (int(x) for x in args.run_time.split(":"))
     run_time = dtime(hour, minute)
@@ -288,13 +418,19 @@ def main() -> int:
         print(signals.to_string(index=False) if not signals.empty else "Sinyal üretilemedi.")
         return 0
 
-    print(f"Günlük sinyal raporu başladı. Her gün (hafta içi) {args.run_time} (Europe/Istanbul) çalışacak.")
+    register_bot_commands()
+    offset_state: dict = {"offset": None}
+    _discard_pending_updates(token, offset_state)
+
+    print(
+        f"Günlük sinyal raporu başladı. Her gün (hafta içi) {args.run_time} (Europe/Istanbul) çalışacak. "
+        f"Bu arada Telegram'da /{REPORT_COMMAND} komutu dinleniyor."
+    )
     while True:
         now = datetime.now(ISTANBUL_TZ)
         next_run = _next_run_datetime(now, run_time)
-        wait_seconds = (next_run - now).total_seconds()
-        print(f"Sıradaki çalışma: {next_run.strftime('%Y-%m-%d %H:%M')} ({wait_seconds / 3600:.1f} saat sonra)")
-        time.sleep(wait_seconds)
+        print(f"Sıradaki çalışma: {next_run.strftime('%Y-%m-%d %H:%M')} ({(next_run - now).total_seconds() / 3600:.1f} saat sonra)")
+        wait_until_with_command_listening(next_run, token, chat_id, offset_state)
 
         print(f"\n[{datetime.now(ISTANBUL_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Günlük rapor çalıştırılıyor...")
         try:
