@@ -319,10 +319,25 @@ def build_daily_signals(
                 "hacim": hist["Volume"].to_numpy(),
             }
         )
+        # Yahoo Finance bazen gün sonuna en yakın (henüz kapanmamış/eksik)
+        # bar'ı NaN kapanış ile döndürür; bu tek satır tail(1) ile seçilip
+        # tüm özellik hesaplamasını (getiri, MA, RSI, MACD) NaN'a çevirir.
+        # Gerçek kapanışı olmayan satırları en baştan eleyerek önlüyoruz.
+        long_df = long_df.dropna(subset=["kapanis"])
+
         features = build_feature_table(long_df)
         last_row = features.tail(1)
         if last_row.empty or last_row[FEATURE_COLUMNS].isna().any(axis=None):
-            print(f"  [UYARI] {sembol}: yetersiz geçmiş ({len(hist)} bar, ısınma dönemi), atlanıyor.")
+            if last_row.empty:
+                nan_cols = "tüm sütunlar (satır yok)"
+            else:
+                nan_cols = last_row[FEATURE_COLUMNS].columns[
+                    last_row[FEATURE_COLUMNS].isna().any()
+                ].tolist()
+            print(
+                f"  [UYARI] {sembol}: yetersiz geçmiş ({len(long_df)} geçerli bar), "
+                f"NaN sütunlar: {nan_cols}, atlanıyor."
+            )
             continue
 
         bar_date = last_row["tarih"].iloc[0].date()
