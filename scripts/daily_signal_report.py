@@ -84,7 +84,7 @@ LAST_REPORT_PATH = ARTIFACTS_DIR / "last_report.json"
 
 ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
 DEFAULT_RUN_TIME = dtime(18, 15)
-HISTORY_PERIOD = "1y"  # MA200 ısınması + son kapanış için yeterli geçmiş
+HISTORY_PERIOD = "2y"  # MA200 ısınması + son kapanış için güvenli pay
 BUY_THRESHOLD = 0.55
 SELL_THRESHOLD = 0.45
 TELEGRAM_MESSAGE_LIMIT = 3500  # Telegram'ın 4096 sınırının altında güvenli pay
@@ -322,7 +322,7 @@ def build_daily_signals(
         features = build_feature_table(long_df)
         last_row = features.tail(1)
         if last_row.empty or last_row[FEATURE_COLUMNS].isna().any(axis=None):
-            print(f"  [UYARI] {sembol}: yetersiz geçmiş (ısınma dönemi), atlanıyor.")
+            print(f"  [UYARI] {sembol}: yetersiz geçmiş ({len(hist)} bar, ısınma dönemi), atlanıyor.")
             continue
 
         bar_date = last_row["tarih"].iloc[0].date()
@@ -339,7 +339,10 @@ def build_daily_signals(
             }
         )
 
-    return pd.DataFrame(rows).sort_values("model_guveni", ascending=False).reset_index(drop=True)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    return df.sort_values("model_guveni", ascending=False).reset_index(drop=True)
 
 
 def _format_report_message(signals: pd.DataFrame, run_time: datetime) -> list[str]:

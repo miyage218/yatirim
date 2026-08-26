@@ -64,10 +64,10 @@ def _build_symbol_features(group: pd.DataFrame, sembol: str) -> pd.DataFrame:
             "sembol": sembol,
             "varlik_tipi": group["varlik_tipi"],
             "kapanis": close,
-            "getiri_1g": close.pct_change(1),
-            "getiri_5g": close.pct_change(5),
-            "getiri_10g": close.pct_change(10),
-            "getiri_20g": close.pct_change(20),
+            "getiri_1g": close.pct_change(1, fill_method=None),
+            "getiri_5g": close.pct_change(5, fill_method=None),
+            "getiri_10g": close.pct_change(10, fill_method=None),
+            "getiri_20g": close.pct_change(20, fill_method=None),
             "ma20_uzaklik": close / ma20 - 1,
             "ma50_uzaklik": close / ma50 - 1,
             "ma200_uzaklik": close / ma200 - 1,
@@ -76,7 +76,7 @@ def _build_symbol_features(group: pd.DataFrame, sembol: str) -> pd.DataFrame:
             "macd": macd_line,
             "macd_sinyal": macd_signal,
             "macd_histogram": macd_hist,
-            "volatilite_20g": close.pct_change().rolling(20).std() * np.sqrt(252),
+            "volatilite_20g": close.pct_change(fill_method=None).rolling(20).std() * np.sqrt(252),
             "hacim_z_skoru": volume_z,
         }
     )
