@@ -226,6 +226,41 @@ likit BIST hissesidir; genişletmek için
 kullanabilir ya da `watchlist_live.txt`'i düzenleyebilirsiniz. Tek seferlik
 test için (18:15'i beklemeden hemen çalıştırır): `python scripts\daily_signal_report.py --once`.
 
+### Gerçek pozisyon takibi + TÜFE/BIST100 karşılaştırma grafiği
+
+Backtest'teki sabit ufuk (10 işlem günü) yerine, canlı sistemde
+**gerçek AL/SAT pozisyon takibi** yapılır (`scripts/positions.py`):
+
+- Bir sembol için açık pozisyon yokken **AL** gelirse pozisyon açılır
+  (giriş fiyatı o günün kapanışı).
+- Açık pozisyon varken **SAT** gelirse pozisyon kapanır, gerçekleşen
+  getiri (`çıkış/giriş - 1`) `artifacts/kapanan_pozisyonlar.csv`'ye
+  kaydedilir.
+- **SAT hiç gelmezse** pozisyon açık kalır; "o hissenin ortalama
+  getirisi" hesaplanırken o güne kadarki gerçekleşmemiş (unrealized)
+  getiri de bir gözlem olarak sayılır.
+- Bir sembolün "yüzdelik kazanç ortalaması" = kapanmış tüm episodların
+  + (varsa) açık pozisyonun o güne kadarki getirisinin ortalaması.
+
+**Aylık TÜFE — tamamen manuel, Telegram hatırlatmalı** (`scripts/tufe_tracker.py`):
+Bu ortamdan (ve pratikte kazımadan) TCMB/TÜİK'e güvenilir otomatik erişim
+kurulamadığı için TÜFE **elle** girilir. Her ayın **ilk hafta sonunda**
+(cumartesi/pazar, ayın ilk 7 günü içinde), o ay için henüz rakam
+girilmediyse bot size Telegram'dan sorar: *"📅 2026-08 ayı için TÜFE
+oranı nedir?"* — düz bir sayıyla (`3.2` gibi) cevaplarsınız, kaydedilir.
+
+**Karşılaştırma grafiği** (`scripts/performance_chart.py`): TÜFE
+girildiğinde otomatik olarak, o ana kadarki **model (gerçek pozisyon
+getirisi) vs TÜFE (kümülatif) vs BIST100 (XU100 endeksi, izlemeye
+başladığınız günden bugüne)** kümülatif getirisini karşılaştıran bir
+çizgi grafiği (PNG) üretilip **Telegram'a resim olarak** gönderilir.
+İstediğiniz an tekrar görmek için bot menüsünden **`/grafik`** komutunu
+kullanabilirsiniz.
+
+**Dürüst not**: Bu karşılaştırma, sistemi kurduğunuz andan itibaren
+biriken **gerçek** (sentetik değil) verilere dayanır — yani ilk ay
+grafikte tek bir nokta olacak, zamanla anlamlı bir eğri oluşacaktır.
+
 ## Proje yapısı
 
 - `yatirim/models.py` — girdi/çıktı veri modelleri (dataclass'lar)
@@ -247,6 +282,9 @@ test için (18:15'i beklemeden hemen çalıştırır): `python scripts\daily_sig
 - `scripts/daily_signal_report.py` — her gün 18:15'te AL/SAT/TUT + Telegram raporu
 - `scripts/run_daily_signal_report.bat` — günlük rapor için Windows başlatıcı
 - `scripts/.env.example` — Telegram kimlik bilgileri şablonu
+- `scripts/positions.py` — gerçek AL/SAT pozisyon takibi
+- `scripts/tufe_tracker.py` — aylık TÜFE'nin manuel/Telegram ile takibi
+- `scripts/performance_chart.py` — model vs TÜFE vs BIST100 grafiği
 - `examples/sample_input.json` — örnek günlük girdi
 - `tests/` — strateji ve ML pipeline kurallarını doğrulayan birim testler
 

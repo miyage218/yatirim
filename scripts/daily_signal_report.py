@@ -34,10 +34,15 @@ sadece ortam değişkeninden veya yanındaki .env dosyasından okur):
     TELEGRAM_BOT_TOKEN=123456:ABC-...
     TELEGRAM_CHAT_ID=123456789
 
-Ayrıca Telegram bot menüsüne bir "/son_rapor" komutu eklenir: bu komuta
-her basıldığında, yeniden hesaplama yapılmadan, en son gönderilen rapor
-ne zaman üretildiği bilgisiyle birlikte tekrar gönderilir (bekleme
-döngüsü sırasında Telegram'dan gelen komutlar long-polling ile dinlenir).
+Ayrıca Telegram bot menüsüne iki komut eklenir:
+  - "/son_rapor": en son gönderilen raporu, ne zaman üretildiği
+    bilgisiyle birlikte, yeniden hesaplamadan tekrar gönderir.
+  - "/grafik": model (gerçek AL/SAT pozisyon takibinden), TÜFE ve
+    BIST100'ün kümülatif getirisini karşılaştıran grafiği gönderir.
+Ayrıca her ayın ilk hafta sonunda, o ay için TÜFE henüz girilmediyse
+Telegram'dan "TÜFE oranı nedir?" diye sorulur; düz bir sayıyla
+("3.2" gibi) cevap verildiğinde kaydedilir ve grafik güncellenir.
+Bekleme döngüsü sırasında bu komutlar/cevaplar long-polling ile dinlenir.
 
 Kullanım:
     python scripts/daily_signal_report.py            # her gün 18:15'i bekler, arada /son_rapor komutunu dinler
@@ -77,6 +82,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from yatirim.ml.features import FEATURE_COLUMNS, build_feature_table  # noqa: E402
 
+import performance_chart  # noqa: E402
+import positions  # noqa: E402
+import tufe_tracker  # noqa: E402
+
 ARTIFACTS_DIR = REPO_ROOT / "artifacts"
 MODEL_PATH = ARTIFACTS_DIR / "model.joblib"
 DEFAULT_SYMBOLS_FILE = REPO_ROOT / "scripts" / "watchlist_live.txt"
@@ -90,6 +99,7 @@ SELL_THRESHOLD = 0.45
 TELEGRAM_MESSAGE_LIMIT = 3500  # Telegram'ın 4096 sınırının altında güvenli pay
 
 REPORT_COMMAND = "son_rapor"
+CHART_COMMAND = "grafik"
 COMMAND_POLL_TIMEOUT_SECONDS = 25  # getUpdates long-poll süresi
 GETUPDATES_ERROR_BACKOFF_SECONDS = 10  # hata durumunda sıkı döngüye girmemek için bekleme
 
@@ -167,12 +177,15 @@ def send_telegram_message(text: str) -> None:
 
 def register_bot_commands() -> None:
     """Bot menüsüne (sohbette '/' tuşuna basınca çıkan liste) /son_rapor
-    komutunu ekler. Bu bir kereye mahsus değildir, script her
-    başladığında tekrar çağrılır (Telegram API'de idempotent).
+    ve /grafik komutlarını ekler. Bu bir kereye mahsus değildir, script
+    her başladığında tekrar çağrılır (Telegram API'de idempotent).
     """
     token, _ = _telegram_credentials()
     url = f"https://api.telegram.org/bot{token}/setMyCommands"
-    commands = [{"command": REPORT_COMMAND, "description": "En son sinyal raporunu tekrar gönder"}]
+    commands = [
+        {"command": REPORT_COMMAND, "description": "En son sinyal raporunu tekrar gönder"},
+        {"command": CHART_COMMAND, "description": "Model vs TÜFE vs BIST100 grafiğini gönder"},
+    ]
     try:
         resp = requests.post(url, json={"commands": commands}, timeout=15)
         if resp.status_code != 200:
@@ -246,9 +259,52 @@ def _get_updates(token: str, offset: int | None, timeout: int) -> list[dict]:
     return resp.json().get("result", [])
 
 
-def _handle_updates(updates: list[dict], chat_id: str) -> int | None:
-    """Gelen komutları işler, işlenen son update_id'yi döner (offset'i
-    ilerletmek için)."""
+def _send_performance_chart(token: str, chat_id: str) -> None:
+    chart_path = performance_chart.generate_chart()
+    if chart_path is None:
+        send_telegram_message(
+            "Henüz grafik için yeterli veri yok — en az bir aylık TÜFE girişi gerekiyor "
+            "(her ayın ilk hafta sonunda otomatik sorulur)."
+        )
+        return
+    performance_chart.send_telegram_photo(token, chat_id, chart_path, caption="Model vs TÜFE vs BIST100")
+
+
+def _finalize_month_snapshot(ay: str, token: str, chat_id: str) -> None:
+    """Bir ayın TÜFE'si girildiğinde: o ana kadarki model performansını
+    (gerçek AL/SAT pozisyonlarından) ve BIST100 kümülatif getirisini de
+    hesaplayıp aylık karşılaştırma tablosuna ekler ve grafiği gönderir.
+    """
+    open_df = positions.load_open_positions()
+    latest_prices = (
+        performance_chart.fetch_latest_prices(open_df["sembol"].tolist()) if not open_df.empty else {}
+    )
+    model_return = positions.overall_model_return(latest_prices)
+
+    tufe_cum_df = tufe_tracker.cumulative_tufe_series()
+    tufe_cumulative = float(tufe_cum_df.iloc[-1]["kumulatif_yuzde"]) if not tufe_cum_df.empty else 0.0
+
+    today_iso = datetime.now(ISTANBUL_TZ).date().isoformat()
+    bist100_cumulative = performance_chart.bist100_cumulative_return(today_iso)
+
+    performance_chart.record_monthly_snapshot(ay, model_return, tufe_cumulative, bist100_cumulative)
+    _send_performance_chart(token, chat_id)
+
+
+def _maybe_send_tufe_reminder(today, chat_id: str) -> None:
+    ay = tufe_tracker.should_prompt_for_tufe(today)
+    if ay is None:
+        return
+    send_telegram_message(
+        f"📅 {ay} ayı için TÜFE (aylık) oranı nedir? Lütfen düz bir sayı olarak "
+        f"cevapla (örn: 3.2)."
+    )
+    tufe_tracker.mark_prompted(ay)
+
+
+def _handle_updates(updates: list[dict], chat_id: str, token: str) -> int | None:
+    """Gelen komutları/cevapları işler, işlenen son update_id'yi döner
+    (offset'i ilerletmek için)."""
     last_update_id = None
     for update in updates:
         last_update_id = update["update_id"]
@@ -259,29 +315,48 @@ def _handle_updates(updates: list[dict], chat_id: str) -> int | None:
         incoming_chat_id = str(message.get("chat", {}).get("id", ""))
         if incoming_chat_id != str(chat_id):
             continue  # yalnızca .env'deki yetkili chat_id'den gelen komutlar işlenir
+
         if text.startswith(f"/{REPORT_COMMAND}"):
             print(f"  Komut alındı: {text} -> son rapor gönderiliyor")
             reply_with_last_report()
+        elif text.startswith(f"/{CHART_COMMAND}"):
+            print(f"  Komut alındı: {text} -> performans grafiği gönderiliyor")
+            _send_performance_chart(token, chat_id)
         elif text == "/start":
             send_telegram_message(
                 f"Merhaba! Her gün 18:15'te otomatik AL/SAT/TUT raporu gönderilir. "
-                f"İstediğin an en son raporu tekrar görmek için menüden /{REPORT_COMMAND} komutunu kullanabilirsin."
+                f"İstediğin an en son raporu tekrar görmek için /{REPORT_COMMAND}, "
+                f"performans grafiğini görmek için /{CHART_COMMAND} komutunu kullanabilirsin."
             )
+        else:
+            pending_ay = tufe_tracker.pending_month()
+            if pending_ay is None:
+                continue
+            value = tufe_tracker.try_parse_reply(text)
+            if value is None:
+                send_telegram_message("Anlayamadım, lütfen sadece sayı olarak yaz (örn: 3.2).")
+                continue
+            print(f"  TÜFE cevabı alındı: {pending_ay} -> %{value}")
+            tufe_tracker.save_tufe(pending_ay, value)
+            send_telegram_message(f"✅ {pending_ay} için TÜFE %{value} olarak kaydedildi.")
+            _finalize_month_snapshot(pending_ay, token, chat_id)
     return last_update_id
 
 
 def wait_until_with_command_listening(next_run: datetime, token: str, chat_id: str, offset_state: dict) -> None:
-    """`next_run`'a kadar bekler; beklerken Telegram'dan gelen komutları
-    (özellikle /son_rapor) long-polling ile dinleyip anında cevaplar.
+    """`next_run`'a kadar bekler; beklerken Telegram'dan gelen komutları/
+    cevapları long-polling ile dinleyip anında cevaplar, ayrıca her
+    hafta sonu TÜFE hatırlatmasının gerekip gerekmediğini kontrol eder.
     """
     while True:
         now = datetime.now(ISTANBUL_TZ)
+        _maybe_send_tufe_reminder(now.date(), chat_id)
         remaining = (next_run - now).total_seconds()
         if remaining <= 0:
             return
         poll_timeout = int(min(COMMAND_POLL_TIMEOUT_SECONDS, max(1, remaining)))
         updates = _get_updates(token, offset_state.get("offset"), poll_timeout)
-        last_id = _handle_updates(updates, chat_id)
+        last_id = _handle_updates(updates, chat_id, token)
         if last_id is not None:
             offset_state["offset"] = last_id + 1
 
@@ -438,6 +513,8 @@ def run_daily_report(model, symbols_file: Path, buy_threshold: float, sell_thres
     for message in messages:
         send_telegram_message(message)
     _save_last_report(messages, now)
+
+    positions.update_positions(signals)
 
     ARTIFACTS_DIR.mkdir(exist_ok=True)
     signals.to_csv(ARTIFACTS_DIR / "gunluk_sinyal_raporu.csv", index=False)
