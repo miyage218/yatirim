@@ -355,13 +355,25 @@ def wait_until_with_command_listening(next_run: datetime, token: str, chat_id: s
     """
     while True:
         now = datetime.now(ISTANBUL_TZ)
-        _maybe_send_tufe_reminder(now.date(), chat_id)
+        try:
+            _maybe_send_tufe_reminder(now.date(), chat_id)
+        except Exception as exc:  # noqa: BLE001 - döngü asla bunun için çökmemeli
+            print(f"  [HATA] TÜFE hatırlatma kontrolü başarısız: {exc}", file=sys.stderr)
+
         remaining = (next_run - now).total_seconds()
         if remaining <= 0:
             return
         poll_timeout = int(min(COMMAND_POLL_TIMEOUT_SECONDS, max(1, remaining)))
         updates = _get_updates(token, offset_state.get("offset"), poll_timeout)
-        last_id = _handle_updates(updates, chat_id, token)
+        try:
+            last_id = _handle_updates(updates, chat_id, token)
+        except Exception as exc:  # noqa: BLE001 - bir komutun başarısız olması döngüyü öldürmemeli
+            print(f"  [HATA] Komut işlenemedi: {exc}", file=sys.stderr)
+            try:
+                send_telegram_message(f"⚠️ Komut işlenirken bir hata oluştu: {exc}")
+            except Exception:  # noqa: BLE001 - bildirim de başarısız olursa sessizce devam
+                pass
+            last_id = updates[-1]["update_id"] if updates else None
         if last_id is not None:
             offset_state["offset"] = last_id + 1
 
