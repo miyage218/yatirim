@@ -406,18 +406,30 @@ def _fetch_daily_history(ticker: str) -> pd.DataFrame | None:
 def _fetch_intraday_bar(ticker: str) -> dict | None:
     """Piyasa kapanmadan (MARKET_CLOSE'dan önce) çalıştırıldığında,
     bugünün şu ana kadar oluşan bar'ını (açılış/en yüksek/en düşük/son
-    fiyat/hacim) 5 dakikalık mumlardan türetir. Veri yoksa None döner.
+    fiyat/hacim) dakikalık mumlardan türetir. Veri yoksa None döner.
+
+    Yahoo Finance BIST gibi yerel borsalar için gün içi veriyi bazen
+    `period="1d"` ile boş döndürüyor (özellikle açılıştan hemen sonra);
+    bu durumda daha geniş bir pencere (`period="5d"`, bugüne filtrelenir)
+    ile tekrar denenir.
     """
-    try:
-        intraday = yf.Ticker(ticker).history(period="1d", interval="5m", auto_adjust=False)
-    except Exception as exc:  # noqa: BLE001 - ağ hatası, bu sembolü atla
-        print(f"  [UYARI] {ticker} gün içi veri alınamadı: {exc}", file=sys.stderr)
+    today = datetime.now(ISTANBUL_TZ).date()
+    for period, interval in (("1d", "5m"), ("5d", "15m")):
+        try:
+            intraday = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=False)
+        except Exception as exc:  # noqa: BLE001 - ağ hatası, bu denemeyi atla
+            print(f"  [UYARI] {ticker} gün içi veri alınamadı ({period}/{interval}): {exc}", file=sys.stderr)
+            continue
+        if intraday is None or intraday.empty:
+            continue
+        intraday.index = pd.DatetimeIndex(intraday.index).tz_localize(None)
+        intraday = intraday[intraday.index.date == today]
+        intraday = intraday.dropna(subset=["Close"])
+        if not intraday.empty:
+            break
+    else:
         return None
-    if intraday is None or intraday.empty:
-        return None
-    intraday = intraday.dropna(subset=["Close"])
-    if intraday.empty:
-        return None
+
     return {
         "acilis": float(intraday["Open"].iloc[0]),
         "yuksek": float(intraday["High"].max()),
