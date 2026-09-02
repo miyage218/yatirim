@@ -251,20 +251,38 @@ Backtest'teki sabit ufuk (10 işlem günü) yerine, canlı sistemde
 - Bir sembolün "yüzdelik kazanç ortalaması" = kapanmış tüm episodların
   + (varsa) açık pozisyonun o güne kadarki getirisinin ortalaması.
 
-**Aylık TÜFE — tamamen manuel, Telegram hatırlatmalı** (`scripts/tufe_tracker.py`):
-Bu ortamdan (ve pratikte kazımadan) TCMB/TÜİK'e güvenilir otomatik erişim
-kurulamadığı için TÜFE **elle** girilir. Her ayın **ilk hafta sonunda**
-(cumartesi/pazar, ayın ilk 7 günü içinde), o ay için henüz rakam
-girilmediyse bot size Telegram'dan sorar: *"📅 2026-08 ayı için TÜFE
-oranı nedir?"* — düz bir sayıyla (`3.2` gibi) cevaplarsınız, kaydedilir.
+**Aylık TÜFE — tamamen manuel** (`scripts/tufe_tracker.py`): Bu ortamdan
+(ve pratikte kazımadan) TCMB/TÜİK'e güvenilir otomatik erişim
+kurulamadığı için TÜFE **elle** girilir, iki şekilde:
+
+1. **Otomatik hatırlatma**: Her ayın **ilk hafta sonunda** (cumartesi/
+   pazar, ayın ilk 7 günü içinde), o ay için henüz rakam girilmediyse bot
+   Telegram'dan sorar: *"📅 2026-08 ayı için TÜFE oranı nedir?"* — düz bir
+   sayıyla (`3.2` gibi) cevaplarsınız, kaydedilir.
+2. **İstediğiniz an, istediğiniz ay için `/tufe` komutu**: hatırlatmayı
+   beklemeden veya geçmiş bir ayı girmek/düzeltmek için:
+   ```
+   /tufe 2026-07 1.78
+   /tufe Temmuz 1.78
+   ```
+   İkisi de aynı şeyi yapar; Türkçe ay adı kullanırsanız yıl otomatik
+   seçilir (bugünden ileri bir ay olmayacak şekilde). Bu komut bot
+   menüsünde de (`/` tuşuna basınca) görünür.
 
 **Karşılaştırma grafiği** (`scripts/performance_chart.py`): TÜFE
-girildiğinde otomatik olarak, o ana kadarki **model (gerçek pozisyon
-getirisi) vs TÜFE (kümülatif) vs BIST100 (XU100 endeksi, izlemeye
-başladığınız günden bugüne)** kümülatif getirisini karşılaştıran bir
-çizgi grafiği (PNG) üretilip **Telegram'a resim olarak** gönderilir.
-İstediğiniz an tekrar görmek için bot menüsünden **`/grafik`** komutunu
+girildiğinde (hatırlatmayla ya da `/tufe` komutuyla, fark etmez)
+otomatik olarak, o ana kadarki **model (gerçek pozisyon getirisi) vs
+TÜFE (kümülatif) vs BIST100 (XU100 endeksi, izlemeye başladığınız
+günden bugüne)** kümülatif getirisini karşılaştıran bir çizgi grafiği
+(PNG) üretilip **Telegram'a resim olarak** gönderilir. İstediğiniz an
+tekrar görmek için bot menüsünden **`/grafik`** komutunu
 kullanabilirsiniz.
+
+**Not**: `/grafik`, `/tufe`, `/son_rapor` komutları yalnızca script
+**sürekli modda** çalışırken (`python scripts\daily_signal_report.py`,
+`--once` DEĞİL) dinlenir ve bot menüsünde görünür — bunlar görsel bir
+"buton" değil, Telegram'ın sohbet kutusunun yanındaki `/` komut
+menüsünde listelenir.
 
 **Dürüst not**: Bu karşılaştırma, sistemi kurduğunuz andan itibaren
 biriken **gerçek** (sentetik değil) verilere dayanır — yani ilk ay

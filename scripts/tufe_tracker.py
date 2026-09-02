@@ -27,9 +27,65 @@ PENDING_PATH = ARTIFACTS_DIR / "tufe_bekliyor.json"
 
 _NUMBER_PATTERN = re.compile(r"-?\d+([.,]\d+)?")
 
+TURKISH_MONTHS = {
+    "ocak": 1,
+    "şubat": 2,
+    "subat": 2,
+    "mart": 3,
+    "nisan": 4,
+    "mayıs": 5,
+    "mayis": 5,
+    "haziran": 6,
+    "temmuz": 7,
+    "ağustos": 8,
+    "agustos": 8,
+    "eylül": 9,
+    "eylul": 9,
+    "ekim": 10,
+    "kasım": 11,
+    "kasim": 11,
+    "aralık": 12,
+    "aralik": 12,
+}
+
 
 def month_key(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
+
+
+def parse_month_and_value(text: str, today: date) -> tuple[str, float] | None:
+    """'/tufe' komutunun argümanlarını ayrıştırır. Desteklenen biçimler:
+    - 'YYYY-MM DEĞER' (ör. '2026-07 1.78')
+    - '<Türkçe ay adı> DEĞER' (ör. 'Temmuz 1.78') — yıl belirtilmezse,
+      o ay bugünden ileride kalmayacak şekilde (gerekirse bir önceki
+      yıla giderek) otomatik seçilir.
+    Ayrıştırılamazsa None döner.
+    """
+    text = text.strip()
+
+    iso_match = re.match(r"^(\d{4})-(\d{1,2})\s+(.+)$", text)
+    if iso_match:
+        year, month = int(iso_match.group(1)), int(iso_match.group(2))
+        value = try_parse_reply(iso_match.group(3))
+        if value is None or not (1 <= month <= 12):
+            return None
+        return f"{year:04d}-{month:02d}", value
+
+    word_match = re.match(r"^([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(.+)$", text)
+    if word_match:
+        ay_adi = word_match.group(1).lower()
+        month = TURKISH_MONTHS.get(ay_adi)
+        if month is None:
+            return None
+        value = try_parse_reply(word_match.group(2))
+        if value is None:
+            return None
+        year = today.year
+        if (year, month) > (today.year, today.month):
+            year -= 1
+        return f"{year:04d}-{month:02d}", value
+
+    return None
 
 
 def is_first_weekend(d: date) -> bool:

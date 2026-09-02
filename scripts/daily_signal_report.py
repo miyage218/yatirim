@@ -105,6 +105,7 @@ TELEGRAM_MESSAGE_LIMIT = 3500  # Telegram'ın 4096 sınırının altında güven
 
 REPORT_COMMAND = "son_rapor"
 CHART_COMMAND = "grafik"
+TUFE_COMMAND = "tufe"
 COMMAND_POLL_TIMEOUT_SECONDS = 25  # getUpdates long-poll süresi
 GETUPDATES_ERROR_BACKOFF_SECONDS = 10  # hata durumunda sıkı döngüye girmemek için bekleme
 
@@ -190,6 +191,7 @@ def register_bot_commands() -> None:
     commands = [
         {"command": REPORT_COMMAND, "description": "En son sinyal raporunu tekrar gönder"},
         {"command": CHART_COMMAND, "description": "Model vs TÜFE vs BIST100 grafiğini gönder"},
+        {"command": TUFE_COMMAND, "description": "TÜFE gir: /tufe 2026-07 1.78 ya da /tufe Temmuz 1.78"},
     ]
     try:
         resp = requests.post(url, json={"commands": commands}, timeout=15)
@@ -327,11 +329,31 @@ def _handle_updates(updates: list[dict], chat_id: str, token: str) -> int | None
         elif text.startswith(f"/{CHART_COMMAND}"):
             print(f"  Komut alındı: {text} -> performans grafiği gönderiliyor")
             _send_performance_chart(token, chat_id)
+        elif text.startswith(f"/{TUFE_COMMAND}"):
+            arg = text[len(f"/{TUFE_COMMAND}"):].strip()
+            if not arg:
+                send_telegram_message(
+                    "Kullanım: /tufe 2026-07 1.78  ya da  /tufe Temmuz 1.78\n"
+                    "(ay + aylık yüzde değişim)"
+                )
+                continue
+            parsed = tufe_tracker.parse_month_and_value(arg, datetime.now(ISTANBUL_TZ).date())
+            if parsed is None:
+                send_telegram_message(
+                    "Anlayamadım. Örnek: /tufe 2026-07 1.78  ya da  /tufe Temmuz 1.78"
+                )
+                continue
+            ay, value = parsed
+            print(f"  /tufe komutu: {ay} -> %{value}")
+            tufe_tracker.save_tufe(ay, value)
+            send_telegram_message(f"✅ {ay} için TÜFE %{value} olarak kaydedildi.")
+            _finalize_month_snapshot(ay, token, chat_id)
         elif text == "/start":
             send_telegram_message(
                 f"Merhaba! Her gün 16:00'ta otomatik AL/SAT/TUT raporu gönderilir. "
                 f"İstediğin an en son raporu tekrar görmek için /{REPORT_COMMAND}, "
-                f"performans grafiğini görmek için /{CHART_COMMAND} komutunu kullanabilirsin."
+                f"performans grafiğini görmek için /{CHART_COMMAND}, "
+                f"TÜFE girmek için /{TUFE_COMMAND} (ör. /tufe Temmuz 1.78) komutunu kullanabilirsin."
             )
         else:
             pending_ay = tufe_tracker.pending_month()
