@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Her gün BIST kapanışından sonra (varsayılan 18:15) bir kez çalışıp,
+"""Her gün (varsayılan saat 16:00, BIST hâlâ açıkken) bir kez çalışıp,
 izleme listesindeki her sembol için AL / SAT / TUT sinyalini tek bir
 Telegram mesajında raporlayan günlük sinyal raporu.
 
@@ -11,12 +11,16 @@ makinenizde çalıştırın (bkz. scripts/run_daily_signal_report.bat).
 dosyasından yükler, kendi başına eğitim yapmaz.
 
 Nasıl çalışır (dürüst özet):
-  - 18:15, BIST kapanışından (18:10) sonra olduğu için script her
-    sembolün GÜNÜN KESİNLEŞMİŞ günlük kapanışını kullanır (gün içi
-    tahmini bar yok). Yahoo Finance'in günlük veriyi ne zaman
-    güncellediği garanti değildir; bir sembolün en güncel bar'ı hâlâ
-    dünküyse rapor bunu açıkça belirtir, o sembolü "veri henüz güncel
-    değil" diye işaretler.
+  - Varsayılan çalışma saati (16:00) BIST kapanışından (18:10) ÖNCEDİR —
+    SAT sinyali geldiğinde piyasa hâlâ açıkken aynı gün işlem
+    yapılabilsin diye kasıtlı olarak böyle seçildi. Bu saatte piyasa
+    henüz kapanmadığı için günün KESİNLEŞMİŞ kapanışı yoktur; script
+    bugünün şu ana kadar oluşan gün içi bar'ını (5 dakikalık mumlardan
+    açılış/en yüksek/en düşük/son fiyat) kullanır ve rapor bunu "piyasa
+    henüz açık" notuyla açıkça belirtir — bu KAPANIŞ ONAYLI DEĞİLDİR,
+    gün sonuna kadar değişebilir. `--run-time` ile 18:10'dan SONRAKİ bir
+    saat verilirse (ör. 18:30), script otomatik olarak günün kesinleşmiş
+    kapanışını kullanır (gün içi tahmin gerekmez).
   - Model GÜNLÜK bar'lar üzerinde, 10 işlem günü ileriye dönük yön
     tahmini için eğitildi. AL/SAT eşikleri model olasılığına (P(yükseliş))
     simetrik uygulanır: P >= buy_threshold -> AL, P <= sell_threshold ->
@@ -45,7 +49,7 @@ Telegram'dan "TÜFE oranı nedir?" diye sorulur; düz bir sayıyla
 Bekleme döngüsü sırasında bu komutlar/cevaplar long-polling ile dinlenir.
 
 Kullanım:
-    python scripts/daily_signal_report.py            # her gün 18:15'i bekler, arada /son_rapor komutunu dinler
+    python scripts/daily_signal_report.py            # her gün 16:00'ı bekler, arada /son_rapor komutunu dinler
     python scripts/daily_signal_report.py --once      # hemen tek sefer rapor üretip çık (test için, komut dinlemez)
     python scripts/daily_signal_report.py --run-time 18:30
     python scripts/daily_signal_report.py --symbols-file scripts/bist100_symbols.txt
@@ -92,7 +96,8 @@ DEFAULT_SYMBOLS_FILE = REPO_ROOT / "scripts" / "watchlist_live.txt"
 LAST_REPORT_PATH = ARTIFACTS_DIR / "last_report.json"
 
 ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
-DEFAULT_RUN_TIME = dtime(18, 15)
+DEFAULT_RUN_TIME = dtime(16, 0)
+MARKET_CLOSE = dtime(18, 10)  # BIST kapanışı — bu saatten önce çalışılırsa gün içi yaklaşık bar kullanılır
 HISTORY_PERIOD = "2y"  # MA200 ısınması + son kapanış için güvenli pay
 BUY_THRESHOLD = 0.55
 SELL_THRESHOLD = 0.45
@@ -219,7 +224,7 @@ def reply_with_last_report() -> None:
     """
     last = _load_last_report()
     if last is None:
-        send_telegram_message("Henüz gönderilmiş bir rapor yok. İlk günlük rapor 18:15'te gönderilecek.")
+        send_telegram_message("Henüz gönderilmiş bir rapor yok. İlk günlük rapor 16:00'ta gönderilecek.")
         return
 
     generated_at = datetime.fromisoformat(last["olusturulma_zamani"])
@@ -324,7 +329,7 @@ def _handle_updates(updates: list[dict], chat_id: str, token: str) -> int | None
             _send_performance_chart(token, chat_id)
         elif text == "/start":
             send_telegram_message(
-                f"Merhaba! Her gün 18:15'te otomatik AL/SAT/TUT raporu gönderilir. "
+                f"Merhaba! Her gün 16:00'ta otomatik AL/SAT/TUT raporu gönderilir. "
                 f"İstediğin an en son raporu tekrar görmek için /{REPORT_COMMAND}, "
                 f"performans grafiğini görmek için /{CHART_COMMAND} komutunu kullanabilirsin."
             )
@@ -398,6 +403,30 @@ def _fetch_daily_history(ticker: str) -> pd.DataFrame | None:
     return hist
 
 
+def _fetch_intraday_bar(ticker: str) -> dict | None:
+    """Piyasa kapanmadan (MARKET_CLOSE'dan önce) çalıştırıldığında,
+    bugünün şu ana kadar oluşan bar'ını (açılış/en yüksek/en düşük/son
+    fiyat/hacim) 5 dakikalık mumlardan türetir. Veri yoksa None döner.
+    """
+    try:
+        intraday = yf.Ticker(ticker).history(period="1d", interval="5m", auto_adjust=False)
+    except Exception as exc:  # noqa: BLE001 - ağ hatası, bu sembolü atla
+        print(f"  [UYARI] {ticker} gün içi veri alınamadı: {exc}", file=sys.stderr)
+        return None
+    if intraday is None or intraday.empty:
+        return None
+    intraday = intraday.dropna(subset=["Close"])
+    if intraday.empty:
+        return None
+    return {
+        "acilis": float(intraday["Open"].iloc[0]),
+        "yuksek": float(intraday["High"].max()),
+        "dusuk": float(intraday["Low"].min()),
+        "kapanis": float(intraday["Close"].iloc[-1]),
+        "hacim": float(intraday["Volume"].sum()),
+    }
+
+
 def _classify(proba: float, buy_threshold: float, sell_threshold: float) -> str:
     if proba >= buy_threshold:
         return "AL"
@@ -409,10 +438,20 @@ def _classify(proba: float, buy_threshold: float, sell_threshold: float) -> str:
 def build_daily_signals(
     model, symbols_file: Path, buy_threshold: float, sell_threshold: float
 ) -> pd.DataFrame:
-    """Watchlist'teki her sembol için en güncel günlük kapanışa dayalı
-    AL/SAT/TUT sinyalini içeren bir DataFrame döner.
+    """Watchlist'teki her sembol için AL/SAT/TUT sinyalini içeren bir
+    DataFrame döner.
+
+    MARKET_CLOSE'dan (18:10) SONRA çalıştırılırsa günün kesinleşmiş
+    kapanışı kullanılır. ÖNCESİNDE çalıştırılırsa (ör. 16:00 varsayılan
+    rapor saati — piyasa hâlâ açıkken SAT sinyaline aynı gün işlem
+    yapılabilsin diye), bugünün şu ana kadar oluşan gün içi bar'ı (5
+    dakikalık mumlardan türetilmiş açılış/en yüksek/en düşük/son fiyat)
+    kullanılır; bu KAPANIŞ ONAYLI DEĞİLDİR, gün sonuna kadar değişebilir.
     """
-    today = datetime.now(ISTANBUL_TZ).date()
+    now = datetime.now(ISTANBUL_TZ)
+    today = now.date()
+    market_closed = now.time() >= MARKET_CLOSE
+
     rows = []
     for ticker, sembol, varlik_tipi in _build_watchlist(symbols_file):
         hist = _fetch_daily_history(ticker)
@@ -437,6 +476,20 @@ def build_daily_signals(
         # tüm özellik hesaplamasını (getiri, MA, RSI, MACD) NaN'a çevirir.
         # Gerçek kapanışı olmayan satırları en baştan eleyerek önlüyoruz.
         long_df = long_df.dropna(subset=["kapanis"])
+
+        if not market_closed:
+            # Piyasa henüz açık: bugüne ait (varsa) satırı çıkar, yerine
+            # gün içi yaklaşık bar'ı ekle — böylece "bugün" her zaman
+            # kesinleşmemiş ama GÜNCEL bir fiyatı yansıtır.
+            long_df = long_df[long_df["tarih"].dt.date < today]
+            bar = _fetch_intraday_bar(ticker)
+            if bar is not None:
+                today_row = pd.DataFrame(
+                    [{"tarih": pd.Timestamp(today), "sembol": sembol, "varlik_tipi": varlik_tipi, **bar}]
+                )
+                long_df = pd.concat([long_df, today_row], ignore_index=True)
+            # bar None ise: gün içi veri alınamadı, en son kapanışla devam
+            # edilir (aşağıda veri_guncel_mi=False olarak işaretlenecek).
 
         features = build_feature_table(long_df)
         last_row = features.tail(1)
@@ -475,6 +528,11 @@ def build_daily_signals(
 
 def _format_report_message(signals: pd.DataFrame, run_time: datetime) -> list[str]:
     header = f"📊 <b>Günlük BIST/Altın/Döviz Sinyal Raporu</b>\n{run_time.strftime('%Y-%m-%d %H:%M')}\n"
+    if run_time.time() < MARKET_CLOSE:
+        header += (
+            "⏳ Piyasa henüz açık — fiyatlar gün içi anlık değerlerdir, "
+            "kapanış onaylı değildir.\n"
+        )
     stale = signals[~signals["veri_guncel_mi"]]
     sections = []
     for label, emoji in (("AL", "📈"), ("SAT", "📉"), ("TUT", "⏸")):
@@ -536,7 +594,7 @@ def main() -> int:
     parser.add_argument("--buy-threshold", type=float, default=BUY_THRESHOLD)
     parser.add_argument("--sell-threshold", type=float, default=SELL_THRESHOLD)
     parser.add_argument(
-        "--run-time", type=str, default="18:15", help="Günlük çalışma saati, HH:MM (Europe/Istanbul, varsayılan 18:15)"
+        "--run-time", type=str, default="16:00", help="Günlük çalışma saati, HH:MM (Europe/Istanbul, varsayılan 16:00)"
     )
     parser.add_argument("--once", action="store_true", help="Hemen tek sefer çalışıp çık (döngü yok, test için)")
     args = parser.parse_args()

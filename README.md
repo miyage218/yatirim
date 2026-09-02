@@ -158,21 +158,30 @@ pipeline otomatik olarak sentetik veriye döner.
 
 ### Günlük sinyal raporu + Telegram bildirimi
 
-`scripts/daily_signal_report.py`, hafta içi her gün **saat 18:15'te**
-(BIST kapanışı 18:10'dan sonra) bir kez çalışır: izleme listesindeki her
-sembolün **günün kesinleşmiş kapanışını** çeker, eğitilmiş modelden
-geçirir ve tamamı için **AL / SAT / TUT** sinyalini tek bir Telegram
-mesajında raporlar (AL: `P(yükseliş) >= 0.55`, SAT: `P <= 0.45`, arası TUT
-— eşikler `--buy-threshold`/`--sell-threshold` ile değiştirilebilir).
+`scripts/daily_signal_report.py`, hafta içi her gün **saat 16:00'da**
+(BIST kapanışından, 18:10'dan, ÖNCE — SAT sinyaline aynı gün işlem
+yapılabilsin diye kasıtlı) bir kez çalışır: izleme listesindeki her
+sembolün fiyatını çeker, eğitilmiş modelden geçirir ve tamamı için
+**AL / SAT / TUT** sinyalini tek bir Telegram mesajında raporlar
+(AL: `P(yükseliş) >= 0.55`, SAT: `P <= 0.45`, arası TUT — eşikler
+`--buy-threshold`/`--sell-threshold` ile değiştirilebilir).
+
+**Kapanış onaylı mı, gün içi mi?** Otomatik belirlenir: `--run-time`
+18:10'dan ÖNCEyse (varsayılan 16:00 gibi) piyasa hâlâ açık olduğu için
+günün KESİNLEŞMİŞ kapanışı yoktur — script bugünün şu ana kadar oluşan
+gün içi bar'ını (5 dakikalık mumlardan türetilmiş) kullanır ve rapor
+başına "⏳ Piyasa henüz açık" notu ekler; bu fiyatlar gün sonuna kadar
+değişebilir. 18:10'dan SONRAki bir saat verirseniz (`--run-time 18:30`
+gibi) günün kesinleşmiş kapanışı kullanılır, gün içi tahmine gerek kalmaz.
 
 **Dürüst sınırlama**: Model **günlük** bar'lar üzerinde, 10 işlem günü
-ileriye dönük yön tahmini için eğitildi; bu rapor o tahminin **o günkü**
+ileriye dönük yön tahmini için eğitildi; bu rapor o tahminin **o anki**
 anlık görüntüsüdür, kesin bir işlem emri değildir. "İşlem maliyeti modeli"
 bölümündeki net rakamlar (isabet oranı ~%50, yani pratikte yazı-turaya
 yakın) burada da geçerli — bildirim almak, kârlı bir sinyal garantisi
-değildir. Ayrıca Yahoo Finance'in günlük veriyi ne zaman güncellediği
-garanti değildir; bir sembolün kapanışı henüz güncellenmemişse rapor bunu
-"⚠️ Veri güncel değil" diye açıkça belirtir.
+değildir. Ayrıca Yahoo Finance'in veriyi ne zaman güncellediği garanti
+değildir; bir sembolün fiyatı henüz güncellenmemişse rapor bunu "⚠️ Veri
+güncel değil" diye açıkça belirtir.
 
 Kurulum:
 
@@ -203,7 +212,7 @@ Kurulum:
    pip install -r requirements-ml.txt
    scripts\run_daily_signal_report.bat
    ```
-   Pencereyi açık bırakın — script bir sonraki 18:15'i (hafta sonuysa
+   Pencereyi açık bırakın — script bir sonraki 16:00'ı (hafta sonuysa
    pazartesiye kayarak) hesaplayıp o ana kadar bekler, sonra raporu
    gönderip bir sonrakini beklemeye devam eder. Arka planda/oturum
    kapansa da çalışsın isterseniz Windows Görev Zamanlayıcı'da bu `.bat`'ı
@@ -224,7 +233,7 @@ başlangıçtan sonra gelen komutlar işlenir).
 likit BIST hissesidir; genişletmek için
 `python scripts\daily_signal_report.py --symbols-file scripts\bist100_symbols.txt`
 kullanabilir ya da `watchlist_live.txt`'i düzenleyebilirsiniz. Tek seferlik
-test için (18:15'i beklemeden hemen çalıştırır): `python scripts\daily_signal_report.py --once`.
+test için (16:00'ı beklemeden hemen çalıştırır): `python scripts\daily_signal_report.py --once`.
 
 ### Gerçek pozisyon takibi + TÜFE/BIST100 karşılaştırma grafiği
 
@@ -279,7 +288,7 @@ grafikte tek bir nokta olacak, zamanla anlamlı bir eğri oluşacaktır.
   (internete açık makinede çalıştırılır, bu depodan değil)
 - `scripts/bist100_symbols.txt` — BIST 100 sembol listesi (yaklaşık)
 - `scripts/watchlist_live.txt` — günlük rapor için daha kısa/likit liste
-- `scripts/daily_signal_report.py` — her gün 18:15'te AL/SAT/TUT + Telegram raporu
+- `scripts/daily_signal_report.py` — her gün 16:00'da AL/SAT/TUT + Telegram raporu
 - `scripts/run_daily_signal_report.bat` — günlük rapor için Windows başlatıcı
 - `scripts/.env.example` — Telegram kimlik bilgileri şablonu
 - `scripts/positions.py` — gerçek AL/SAT pozisyon takibi
