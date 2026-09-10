@@ -288,6 +288,38 @@ menüsünde listelenir.
 biriken **gerçek** (sentetik değil) verilere dayanır — yani ilk ay
 grafikte tek bir nokta olacak, zamanla anlamlı bir eğri oluşacaktır.
 
+### Portföy ekran görüntüsü analizi (yerel OCR)
+
+Bota (sürekli mod çalışırken) bir yatırım/borsa uygulamasından aldığınız
+**portföy ekran görüntüsünü fotoğraf olarak** gönderdiğinizde,
+`scripts/portfolio_photo.py` görüntüyü yerel OCR ile okur, hisse
+kodlarını ve adetlerini çıkarır, günün sinyal raporuyla karşılaştırıp
+her biri için **TUT** (elindeki + model AL/kararsız diyor) veya **SAT**
+(model düşüş öngörüyor) önerisi verir; ayrıca elinizde olmayıp modelin
+**AL** dediği hisseleri de ayrıca listeler.
+
+Kurulum (yalnızca bu özellik için ek adım):
+```bash
+pip install pytesseract pillow
+```
+Ayrıca **Tesseract OCR motorunun kendisini** ayrıca kurmanız gerekir
+(pip paketi sadece bir Python sarmalayıcısıdır) —
+[UB Mannheim derlemesi](https://github.com/UB-Mannheim/tesseract/wiki)
+üzerinden Windows `.exe` kurulumunda **Türkçe dil paketini** de
+işaretleyin. Varsayılan kurulum yolu farklıysa `scripts\.env`'e ekleyin:
+```
+TESSERACT_CMD=C:\tam\yol\tesseract.exe
+```
+
+**Dürüst sınırlama**: Yerel/ücretsiz OCR, ekran görüntüsündeki hisse
+kodu/adedini her zaman doğru okumayabilir (bulanık görüntü, farklı
+tema/yazı tipi, kırpılmış ekran). Bu yüzden bot, önerisinden **önce**
+ne okuduğunu ("📷 Görüntüden okunanlar") açıkça listeler — yanlış
+okunan bir şey görürseniz o kısmı görmezden gelin ya da net bir ekran
+görüntüsüyle tekrar deneyin. Ayrıca yalnızca `scripts/bist100_symbols.txt`
+içindeki bilinen BIST kodları aday olarak kabul edilir (rastgele OCR
+gürültüsünün gerçek bir kod sanılmasını engellemek için).
+
 ## Proje yapısı
 
 - `yatirim/models.py` — girdi/çıktı veri modelleri (dataclass'lar)
@@ -312,6 +344,7 @@ grafikte tek bir nokta olacak, zamanla anlamlı bir eğri oluşacaktır.
 - `scripts/positions.py` — gerçek AL/SAT pozisyon takibi
 - `scripts/tufe_tracker.py` — aylık TÜFE'nin manuel/Telegram ile takibi
 - `scripts/performance_chart.py` — model vs TÜFE vs BIST100 grafiği
+- `scripts/portfolio_photo.py` — portföy ekran görüntüsü OCR analizi
 - `examples/sample_input.json` — örnek günlük girdi
 - `tests/` — strateji ve ML pipeline kurallarını doğrulayan birim testler
 

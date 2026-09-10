@@ -87,6 +87,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from yatirim.ml.features import FEATURE_COLUMNS, build_feature_table  # noqa: E402
 
 import performance_chart  # noqa: E402
+import portfolio_photo  # noqa: E402
 import positions  # noqa: E402
 import tufe_tracker  # noqa: E402
 
@@ -309,6 +310,31 @@ def _maybe_send_tufe_reminder(today, chat_id: str) -> None:
     tufe_tracker.mark_prompted(ay)
 
 
+def _handle_portfolio_photo(message: dict, token: str, chat_id: str) -> None:
+    """Kullanıcının attığı portföy ekran görüntüsünü indirir, yerel OCR ile
+    okur, tespit edilen hisseleri son sinyal raporuyla karşılaştırıp
+    TUT/SAT/AL önerisi gönderir.
+    """
+    photo_sizes = message["photo"]
+    largest = max(photo_sizes, key=lambda p: p.get("width", 0))
+    photo_path = portfolio_photo.download_telegram_photo(token, largest["file_id"])
+    if photo_path is None:
+        send_telegram_message("⚠️ Fotoğraf indirilemedi, tekrar gönderir misin?")
+        return
+
+    ocr_text = portfolio_photo.extract_text_from_image(photo_path)
+    if ocr_text is None:
+        send_telegram_message(
+            "⚠️ Görüntü okunamadı — Tesseract OCR motoru kurulu değil olabilir. "
+            "scripts/portfolio_photo.py başındaki kurulum notuna bakar mısın?"
+        )
+        return
+
+    holdings = portfolio_photo.parse_portfolio_from_text(ocr_text)
+    advice = portfolio_photo.build_portfolio_advice(holdings)
+    send_telegram_message(advice)
+
+
 def _handle_updates(updates: list[dict], chat_id: str, token: str) -> int | None:
     """Gelen komutları/cevapları işler, işlenen son update_id'yi döner
     (offset'i ilerletmek için)."""
@@ -323,7 +349,10 @@ def _handle_updates(updates: list[dict], chat_id: str, token: str) -> int | None
         if incoming_chat_id != str(chat_id):
             continue  # yalnızca .env'deki yetkili chat_id'den gelen komutlar işlenir
 
-        if text.startswith(f"/{REPORT_COMMAND}"):
+        if message.get("photo"):
+            print("  Fotoğraf alındı -> portföy ekran görüntüsü analiz ediliyor")
+            _handle_portfolio_photo(message, token, chat_id)
+        elif text.startswith(f"/{REPORT_COMMAND}"):
             print(f"  Komut alındı: {text} -> son rapor gönderiliyor")
             reply_with_last_report()
         elif text.startswith(f"/{CHART_COMMAND}"):
@@ -353,7 +382,9 @@ def _handle_updates(updates: list[dict], chat_id: str, token: str) -> int | None
                 f"Merhaba! Her gün 16:00'ta otomatik AL/SAT/TUT raporu gönderilir. "
                 f"İstediğin an en son raporu tekrar görmek için /{REPORT_COMMAND}, "
                 f"performans grafiğini görmek için /{CHART_COMMAND}, "
-                f"TÜFE girmek için /{TUFE_COMMAND} (ör. /tufe Temmuz 1.78) komutunu kullanabilirsin."
+                f"TÜFE girmek için /{TUFE_COMMAND} (ör. /tufe Temmuz 1.78) komutunu kullanabilirsin. "
+                f"Portföyünün ekran görüntüsünü atarsan, elindeki hisseleri son rapora göre "
+                f"analiz edip TUT/SAT önerisi veririm."
             )
         else:
             pending_ay = tufe_tracker.pending_month()
