@@ -68,6 +68,34 @@ def test_build_portfolio_advice_missing_signals_csv(tmp_path, monkeypatch):
     assert "günlük sinyal raporu" in advice
 
 
+# Gerçek bir İş Bankası "Mobil Borsa" ekran görüntüsünden Tesseract'ın
+# ürettiği ham çıktı (2026-09-11'de VM üzerinde alındı). Etiketler
+# ("Satılabilir Adet" gibi) tüm hisseler için önce tek blok halinde,
+# değerler ise ayrı bir blok halinde geliyor — SAMPLE_OCR_TEXT'teki
+# düzenli satır-satır yapıdan çok farklı. parse_portfolio_from_text
+# her iki düzeni de doğru okuyabilmeli.
+REAL_TESSERACT_OCR_TEXT = (
+    "16:127 all 4G ED\n\nMobil Borsa\n\nSon Güncelleme: 2 dakika önce\n\na\n\n"
+    "SAHOL.E V 1/77\nSABANCI HOLDING\n\nSon Fiyat\n\nBugünkü Değer\nSatılabilir Adet\n"
+    "Potansiyel Kar/Zarar\n\nPotansiyel Getiri\n\nISCTR.E V 72.557\nIS BANKASI (C)\n\n"
+    "Son Fiyat\n\nBugünkü Değer\nSatılabilir Adet\nPotansiyel Kar/Zarar\n\n"
+    "Potansiyel Getiri\n\nTUPRS.E 4 70,66\nTUPRAS\n\nSon Fiyat\nBugünkü Değer\n"
+    "Satılabilir Adet\n\nPotansiyel Kar/Zarar\n\nTo aolia) Emirlerim O Portföyüm VIOP\n\n \n\n"
+    "o0\nKN\n943,50 TL\n10,00\n+34,60 TL\n*73,81\n13,59 TL\n883,35 TL\n65,00\n-58,50 TL\n"
+    "-%6,21\n417,00 TL\n834,00 TL\n2,00\n+28,50TL\n\n0)\n\nAnaliz\n\x0c"
+)
+
+
+def test_parse_portfolio_from_text_handles_real_tesseract_layout():
+    holdings = portfolio_photo.parse_portfolio_from_text(REAL_TESSERACT_OCR_TEXT)
+    by_symbol = {h["sembol"]: h["adet"] for h in holdings}
+    assert by_symbol == {
+        "BIST:SAHOL": 10.0,
+        "BIST:ISCTR": 65.0,
+        "BIST:TUPRS": 2.0,
+    }
+
+
 def test_build_portfolio_advice_classifies_al_sat_tut(tmp_path, monkeypatch):
     signals_path = tmp_path / "gunluk_sinyal_raporu.csv"
     pd.DataFrame(

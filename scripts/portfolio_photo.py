@@ -34,7 +34,43 @@ SIGNALS_CSV_PATH = ARTIFACTS_DIR / "gunluk_sinyal_raporu.csv"
 DOWNLOADED_PHOTO_PATH = ARTIFACTS_DIR / "son_portfoy_foto.jpg"
 
 _TICKER_PATTERN = re.compile(r"\b([A-ZÇĞİÖŞÜ]{3,6})(?:\.[A-Z])?\b")
-_ADET_PATTERN = re.compile(r"Sat[ıi]labilir\s*Adet[^\d\n]{0,60}(\d{1,3}(?:[.,]\d+)?)", re.IGNORECASE)
+
+# Gerçek Tesseract çıktısında (mobil uygulama arayüzünün sütunlu
+# yapısı yüzünden) etiketler ("Satılabilir Adet" gibi) tüm hisseler
+# için önce tek blok halinde, DEĞERLER ise ayrı bir blok halinde,
+# etiketlerle aynı sırada gelebiliyor — yani "Satılabilir Adet"
+# kelimesinin hemen yanında sayı olmuyor. Bu yüzden adet sayılarını
+# "TL yazmayan, işaretsiz (+/-/%siz), yanında TL kelimesi olmayan
+# bağımsız sayı" olarak tanıyıp, tespit edilen ticker sırasıyla
+# pozisyonel eşliyoruz (Son Fiyat/Bugünkü Değer hep "<sayı> TL",
+# Kar/Zarar ve Getiri hep işaretli/% içerir; sadece Adet çıplak bir
+# sayıdır).
+_BARE_NUMBER_TOKEN = re.compile(r"^\d{1,4}(?:[.,]\d{1,2})?$")
+# Bu kelimelerden biri bir sayının hemen ardından geliyorsa, o sayı adet
+# değil başka bir şeydir (TL tutarı, "X dakika önce" zaman damgası, ...).
+_NOT_ADET_FOLLOWERS = {"TL", "DAKIKA", "SAAT", "SANIYE", "GÜN", "GUN"}
+
+
+def _extract_bare_adet_tokens(text: str, known_symbols: set[str]) -> list[float]:
+    adet_values: list[float] = []
+    for line in text.splitlines():
+        # Bir hisse kodunun (ör. "TUPRS.E") göründüğü başlık satırında
+        # genelde fiyat/yüzde değişimi de bulunuyor — bunlar adet değil,
+        # bu yüzden ticker içeren satırları tamamen atlıyoruz.
+        if any(m.group(1) in known_symbols for m in _TICKER_PATTERN.finditer(line.upper())):
+            continue
+        tokens = line.split()
+        for idx, tok in enumerate(tokens):
+            if not _BARE_NUMBER_TOKEN.fullmatch(tok):
+                continue
+            next_tok = tokens[idx + 1] if idx + 1 < len(tokens) else ""
+            if next_tok.upper() in _NOT_ADET_FOLLOWERS:
+                continue
+            try:
+                adet_values.append(float(tok.replace(",", ".")))
+            except ValueError:
+                continue
+    return adet_values
 
 
 def _load_known_symbols() -> set[str]:
@@ -100,28 +136,28 @@ def parse_portfolio_from_text(text: str) -> list[dict]:
     hisse kodu gibi yanlış algılanmasını büyük ölçüde engeller.
     """
     known = _load_known_symbols()
-    lines = text.splitlines()
-    holdings: list[dict] = []
     seen: set[str] = set()
-
-    for i, line in enumerate(lines):
+    tickers: list[str] = []
+    for line in text.splitlines():
         for match in _TICKER_PATTERN.finditer(line.upper()):
             ticker = match.group(1)
-            if ticker not in known or ticker in seen:
-                continue
-            # Uygulama ekranında her hisse bloğu birkaç satır sürüyor
-            # (Son Fiyat, Bugünkü Değer, Satılabilir Adet, ...) — ticker
-            # satırından sonraki birkaç satır içinde adedi ara.
-            window = "\n".join(lines[i : i + 9])
-            adet_match = _ADET_PATTERN.search(window)
-            if adet_match is None:
-                continue
-            try:
-                adet = float(adet_match.group(1).replace(",", "."))
-            except ValueError:
-                continue
-            holdings.append({"sembol": f"BIST:{ticker}", "adet": adet})
-            seen.add(ticker)
+            if ticker in known and ticker not in seen:
+                tickers.append(ticker)
+                seen.add(ticker)
+
+    if not tickers:
+        return []
+
+    adet_values = _extract_bare_adet_tokens(text, known)
+    if not adet_values:
+        return []
+
+    # Ticker'lar ve adetler ekranda aynı sırada göründüğü için
+    # pozisyonel olarak eşleniyor. Sayıları tutarsız çıkarsa (adet
+    # sayısı ticker sayısından azsa) sadece eşleşen kadarını kullan.
+    holdings: list[dict] = []
+    for ticker, adet in zip(tickers, adet_values):
+        holdings.append({"sembol": f"BIST:{ticker}", "adet": adet})
 
     return holdings
 
