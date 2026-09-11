@@ -320,6 +320,61 @@ görüntüsüyle tekrar deneyin. Ayrıca yalnızca `scripts/bist100_symbols.txt`
 içindeki bilinen BIST kodları aday olarak kabul edilir (rastgele OCR
 gürültüsünün gerçek bir kod sanılmasını engellemek için).
 
+### 7/24 çalıştırma — bulut VM'e (Oracle Cloud Always Free) kurulum
+
+Windows'ta script'i çalıştırmak için bilgisayarı sürekli açık bırakmak
+istemiyorsanız, `scripts/daily_signal_report.py`'yi ücretsiz bir Linux
+VM'de (ör. Oracle Cloud'un "Always Free" katmanındaki Ampere ARM VM'i,
+$0/ay, süresiz) 7/24 çalışacak şekilde kurabilirsiniz.
+
+1. **VM oluşturun** (Oracle Cloud Console üzerinden, tarayıcıdan):
+   `Compute` → `Instances` → `Create Instance` → Image olarak
+   **Canonical Ubuntu** (22.04/24.04), Shape olarak **VM.Standard.A1.Flex**
+   (Always Free) seçin, 1-4 OCPU / 6-24GB RAM ayarlayın. SSH anahtar
+   çiftinizi (yoksa Console'da "Generate a key pair for me" ile) indirin.
+   Oluşturduktan sonra VM'in genel IP adresini not edin.
+
+2. **SSH ile bağlanın** (kendi bilgisayarınızdan):
+   ```bash
+   ssh -i indirdiginiz_anahtar.key ubuntu@<VM_IP_ADRESI>
+   ```
+
+3. **Repoyu klonlayıp kurulum script'ini çalıştırın**:
+   ```bash
+   git clone https://github.com/miyage218/yatirim.git
+   cd yatirim
+   bash scripts/setup_vm.sh
+   ```
+   Bu, sistem paketlerini (Python, Tesseract OCR + Türkçe dil paketi),
+   Python sanal ortamını ve bağımlılıkları kurar; `scripts/.env`
+   dosyasını `scripts/.env.example`'dan oluşturur (token'ları **siz elle**
+   dolduracaksınız — script sırları otomatik yazmaz):
+   ```bash
+   nano scripts/.env
+   ```
+
+4. **Veri toplayın ve modeli eğitin** (script çıktısındaki adımları
+   izleyin):
+   ```bash
+   source .venv/bin/activate
+   python scripts/collect_market_data.py --years 3 --out gercek_fiyatlar.csv
+   python -m yatirim.ml.run_pipeline --data gercek_fiyatlar.csv
+   python scripts/daily_signal_report.py --once   # test
+   ```
+
+5. **7/24 çalışması için systemd servisi kurun** (VM yeniden başlasa
+   bile otomatik başlar, çökerse kendini yeniden başlatır):
+   ```bash
+   bash scripts/install_systemd_service.sh
+   ```
+   Durumu kontrol etmek için: `sudo systemctl status daily-signal-report`
+   Canlı log izlemek için: `sudo journalctl -u daily-signal-report -f`
+
+Bundan sonra bilgisayarınızı kapatabilirsiniz — VM Oracle'ın veri
+merkezinde 7/24 çalışmaya devam eder, günlük rapor ve Telegram
+komutları (`/son_rapor`, `/grafik`, `/tufe`, portföy fotoğrafı analizi)
+kesintisiz işler.
+
 ## Proje yapısı
 
 - `yatirim/models.py` — girdi/çıktı veri modelleri (dataclass'lar)
@@ -345,6 +400,9 @@ gürültüsünün gerçek bir kod sanılmasını engellemek için).
 - `scripts/tufe_tracker.py` — aylık TÜFE'nin manuel/Telegram ile takibi
 - `scripts/performance_chart.py` — model vs TÜFE vs BIST100 grafiği
 - `scripts/portfolio_photo.py` — portföy ekran görüntüsü OCR analizi
+- `scripts/setup_vm.sh` — Linux VM'de (ör. Oracle Cloud) tek komutla kurulum
+- `scripts/install_systemd_service.sh` — 7/24 çalışması için systemd servisi kurar
+- `scripts/daily-signal-report.service.template` — systemd servis şablonu
 - `examples/sample_input.json` — örnek günlük girdi
 - `tests/` — strateji ve ML pipeline kurallarını doğrulayan birim testler
 
